@@ -740,20 +740,25 @@
                 case 'RoomCreated':
                     roomCode = msg.data.code;
                     document.getElementById('roomCodeDisplay').textContent = roomCode;
-                    showScreen('waitingScreen');
-                    updateStatus('Waiting for peer', 'connecting');
+                    // Derive key from room code immediately (no waiting for peer)
+                    await crypto_instance.deriveKeyFromCode(roomCode);
+                    keyExchangeDone = true;
+                    // Go directly to chat - a gathering of one is also a real gathering
+                    startChat();
+                    showToast('Room created: ' + roomCode, 'success');
                     break;
 
                 case 'Joined':
                     roomCode = msg.data.code;
+                    // Derive key from room code immediately
+                    await crypto_instance.deriveKeyFromCode(roomCode);
+                    keyExchangeDone = true;
                     if (msg.data.peer_count > 1) {
                         peerJoined = true;
-                        // Send our public key
-                        ws.send(JSON.stringify({
-                            type: 'Forward',
-                            data: { data: 'KEY:' + myPublicKey }
-                        }));
                     }
+                    // Go directly to chat
+                    startChat();
+                    showToast('Joined room: ' + roomCode + ' (' + msg.data.peer_count + ' in room)', 'success');
                     break;
 
                 case 'PeerJoined':
