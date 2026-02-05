@@ -487,9 +487,12 @@
         let audioContext = null;
         let mediaStream = null;
         let mediaRecorder = null;
-        let currentSpeaker = null;
+        let activeSpeakers = new Set(); // Multiple simultaneous speakers
         let audioQueue = [];
         let isPlaying = false;
+        let pendingAudioHistory = []; // Audio to play back on tune in
+        let speechRecognition = null;
+        let currentTranscript = '';
 
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -593,10 +596,16 @@
                     document.getElementById('messagesContainer').innerHTML = '';
                     updatePeerCount(1);
                     resetRadio();
+                    pendingAudioHistory = [];
 
                     if (msg.data.history) {
                         msg.data.history.forEach(m => {
-                            if (m.content && (m.content.startsWith('AUDIO:') || m.content.startsWith('TX_'))) return;
+                            if (m.content && m.content.startsWith('AUDIO:') && m.isAudio) {
+                                // Store audio for playback when tuned in
+                                pendingAudioHistory.push(m);
+                                return;
+                            }
+                            if (m.content && m.content.startsWith('TX_')) return;
                             if (m.alias === 'SYSTEM') {
                                 addSystemMessage(m.content);
                             } else {
@@ -606,7 +615,11 @@
                     }
 
                     showScreen('chatScreen');
-                    showToast('Channel created: ' + channelCode, 'success');
+                    if (pendingAudioHistory.length > 0) {
+                        showToast('Channel created: ' + channelCode + ' (' + pendingAudioHistory.length + ' audio clips)', 'success');
+                    } else {
+                        showToast('Channel created: ' + channelCode, 'success');
+                    }
                     loadLeaderboard();
                     break;
 
@@ -619,10 +632,16 @@
                     document.getElementById('messagesContainer').innerHTML = '';
                     updatePeerCount(msg.data.peer_count || 1);
                     resetRadio();
+                    pendingAudioHistory = [];
 
                     if (msg.data.history) {
                         msg.data.history.forEach(m => {
-                            if (m.content && (m.content.startsWith('AUDIO:') || m.content.startsWith('TX_'))) return;
+                            if (m.content && m.content.startsWith('AUDIO:') && m.isAudio) {
+                                // Store audio for playback when tuned in
+                                pendingAudioHistory.push(m);
+                                return;
+                            }
+                            if (m.content && m.content.startsWith('TX_')) return;
                             if (m.alias === 'SYSTEM') {
                                 addSystemMessage(m.content);
                             } else {
@@ -632,7 +651,11 @@
                     }
 
                     showScreen('chatScreen');
-                    showToast('Joined ' + channelCode + ' as ' + myAlias, 'success');
+                    if (pendingAudioHistory.length > 0) {
+                        showToast('Joined ' + channelCode + ' - ' + pendingAudioHistory.length + ' audio clips available', 'success');
+                    } else {
+                        showToast('Joined ' + channelCode + ' as ' + myAlias, 'success');
+                    }
                     loadLeaderboard();
                     break;
 
@@ -670,7 +693,7 @@
         function resetRadio() {
             isTunedIn = false;
             isTransmitting = false;
-            currentSpeaker = null;
+            activeSpeakers.clear();
             audioQueue = [];
 
             document.getElementById('tuneBtn').classList.remove('tuned-in');
@@ -717,7 +740,13 @@
                 document.getElementById('tuneBtn').innerHTML = '<span>📡</span> Tuned In';
                 document.getElementById('pttBtn').disabled = false;
 
-                showToast('Radio tuned in - hold PTT to transmit', 'success');
+                // Play back any pending audio history
+                if (pendingAudioHistory.length > 0) {
+                    showToast('Playing ' + pendingAudioHistory.length + ' recent audio clips...', 'success');
+                    playAudioHistory();
+                } else {
+                    showToast('Radio tuned in - hold PTT to transmit', 'success');
+                }
 
             } catch (err) {
                 console.error('Microphone access failed:', err);
@@ -725,10 +754,67 @@
             }
         }
 
+        async function playAudioHistory() {
+            if (!audioContext || pendingAudioHistory.length === 0) return;
+
+            document.getElementById('radioSpeakers').innerHTML =
+                '<span style="color: var(--warning);">📼 Playing back recorded transmissions...</span>';
+            document.getElementById('rxLed').className = 'radio-led receiving';
+
+            for (const audioMsg of pendingAudioHistory) {
+                try {
+                    await playAudioClip(audioMsg.content, audioMsg.alias);
+                    // Small pause between clips
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                } catch (err) {
+                    console.error('Error playing audio history:', err);
+                }
+            }
+
+            pendingAudioHistory = [];
+            document.getElementById('rxLed').className = 'radio-led';
+            document.getElementById('radioSpeakers').innerHTML =
+                '<span style="color: var(--text-muted);">No transmissions</span>';
+            showToast('Playback complete - hold PTT to transmit', 'success');
+        }
+
+        async function playAudioClip(content, alias) {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    if (!audioContext || audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+
+                    const base64 = content.substring(6); // Remove 'AUDIO:' prefix
+                    const binaryString = atob(base64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    source.onended = resolve;
+                    source.start(0);
+
+                    // Update display
+                    document.getElementById('radioSpeakers').innerHTML =
+                        `<span class="radio-speaker active">📼 ${alias}</span>`;
+
+                } catch (err) {
+                    console.error('Audio clip error:', err);
+                    resolve(); // Continue even on error
+                }
+            });
+        }
+
         function startTransmit() {
             if (!isTunedIn || isTransmitting || !mediaStream) return;
 
             isTransmitting = true;
+            currentTranscript = '';
             document.getElementById('pttBtn').classList.add('active');
             document.getElementById('txLed').className = 'radio-led transmitting';
 
@@ -737,6 +823,9 @@
                 type: 'Broadcast',
                 data: { content: 'TX_START:' + myAlias }
             }));
+
+            // Start speech recognition for transcription
+            startSpeechRecognition();
 
             // Start recording
             mediaRecorder = new MediaRecorder(mediaStream, {
@@ -777,6 +866,48 @@
             updateVU();
         }
 
+        function startSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                console.log('Speech recognition not supported');
+                return;
+            }
+
+            try {
+                speechRecognition = new SpeechRecognition();
+                speechRecognition.continuous = true;
+                speechRecognition.interimResults = true;
+                speechRecognition.lang = 'en-US';
+
+                speechRecognition.onresult = (event) => {
+                    let finalTranscript = '';
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    if (finalTranscript) {
+                        currentTranscript += finalTranscript + ' ';
+                    }
+                };
+
+                speechRecognition.onerror = (e) => {
+                    console.log('Speech recognition error:', e.error);
+                };
+
+                speechRecognition.start();
+            } catch (err) {
+                console.log('Speech recognition failed to start:', err);
+            }
+        }
+
+        function stopSpeechRecognition() {
+            if (speechRecognition) {
+                speechRecognition.stop();
+                speechRecognition = null;
+            }
+        }
+
         function stopTransmit() {
             if (!isTransmitting) return;
 
@@ -788,6 +919,21 @@
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
             }
+
+            // Stop speech recognition and send transcript
+            stopSpeechRecognition();
+
+            // Wait a moment for final transcript then send
+            setTimeout(() => {
+                if (currentTranscript.trim()) {
+                    // Send transcription as a regular text message with voice indicator
+                    ws.send(JSON.stringify({
+                        type: 'Broadcast',
+                        data: { content: '🎙️ ' + currentTranscript.trim() }
+                    }));
+                }
+                currentTranscript = '';
+            }, 500);
 
             // Notify channel
             ws.send(JSON.stringify({
@@ -803,17 +949,27 @@
             const alias = data.alias;
 
             if (content.startsWith('TX_START:')) {
-                currentSpeaker = alias;
-                document.getElementById('rxLed').className = 'radio-led receiving';
-                document.getElementById('radioSpeakers').innerHTML =
-                    `<span class="radio-speaker active">🎙️ ${alias} transmitting...</span>`;
+                activeSpeakers.add(alias);
+                updateSpeakersDisplay();
             } else if (content.startsWith('TX_END:')) {
-                if (currentSpeaker === alias) {
-                    currentSpeaker = null;
-                    document.getElementById('rxLed').className = 'radio-led';
-                    document.getElementById('radioSpeakers').innerHTML =
-                        '<span style="color: var(--text-muted);">No transmissions</span>';
-                }
+                activeSpeakers.delete(alias);
+                updateSpeakersDisplay();
+            }
+        }
+
+        function updateSpeakersDisplay() {
+            const speakersEl = document.getElementById('radioSpeakers');
+            const rxLed = document.getElementById('rxLed');
+
+            if (activeSpeakers.size === 0) {
+                rxLed.className = 'radio-led';
+                speakersEl.innerHTML = '<span style="color: var(--text-muted);">No transmissions</span>';
+            } else {
+                rxLed.className = 'radio-led receiving';
+                const speakerTags = Array.from(activeSpeakers).map(alias =>
+                    `<span class="radio-speaker active">🎙️ ${alias}</span>`
+                ).join(' ');
+                speakersEl.innerHTML = speakerTags;
             }
         }
 
@@ -843,7 +999,7 @@
                 const avg = 50 + Math.random() * 30;
                 document.getElementById('vuBar').style.width = avg + '%';
                 setTimeout(() => {
-                    if (!isTransmitting && currentSpeaker) {
+                    if (!isTransmitting && activeSpeakers.size > 0) {
                         document.getElementById('vuBar').style.width = '0%';
                     }
                 }, 250);

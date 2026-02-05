@@ -6,6 +6,8 @@ interface Message {
   alias: string;
   content: string;
   timestamp: string; // ISO string for KV storage
+  isAudio?: boolean; // Flag for audio messages
+  expiresAt?: string; // ISO string for audio TTL
 }
 
 interface ChannelData {
@@ -203,6 +205,16 @@ function handleWebSocket(ws: WebSocket) {
           currentChannel = code;
 
           const peers = getPeers(code);
+
+          // Filter out expired audio messages before sending history
+          const currentTime = new Date();
+          const filteredHistory = channel.messages.filter(m => {
+            if (m.isAudio && m.expiresAt) {
+              return new Date(m.expiresAt) > currentTime;
+            }
+            return true;
+          });
+
           ws.send(JSON.stringify({
             type: 'ChannelJoined',
             data: {
@@ -210,7 +222,7 @@ function handleWebSocket(ws: WebSocket) {
               alias: myAlias,
               peer_count: peers.size,
               activeAliases: Array.from(peers.values()),
-              history: channel.messages
+              history: filteredHistory
             }
           }));
 
@@ -223,18 +235,34 @@ function handleWebSocket(ws: WebSocket) {
           if (currentChannel) {
             const channel = await getChannel(currentChannel);
             if (channel) {
-              const now = new Date().toISOString();
+              const now = new Date();
+              const nowISO = now.toISOString();
               const content = msg.data?.data || msg.data?.content || '';
+
+              // Check if this is an audio message
+              const isAudio = content.startsWith('AUDIO:');
 
               const message: Message = {
                 id: generateMessageId(),
                 alias: myAlias,
                 content,
-                timestamp: now
+                timestamp: nowISO,
+                isAudio,
+                // Audio expires after 5 minutes
+                expiresAt: isAudio ? new Date(now.getTime() + 5 * 60 * 1000).toISOString() : undefined
               };
 
+              // Clean up expired audio messages before adding new one
+              const currentTime = new Date();
+              channel.messages = channel.messages.filter(m => {
+                if (m.isAudio && m.expiresAt) {
+                  return new Date(m.expiresAt) > currentTime;
+                }
+                return true; // Keep non-audio messages forever
+              });
+
               channel.messages.push(message);
-              channel.lastActivity = now;
+              channel.lastActivity = nowISO;
               await saveChannel(channel);
 
               // Broadcast to all including sender
@@ -258,11 +286,20 @@ function handleWebSocket(ws: WebSocket) {
           if (currentChannel) {
             const channel = await getChannel(currentChannel);
             if (channel) {
+              // Filter expired audio messages
+              const currentTime = new Date();
+              const filteredMessages = channel.messages.filter(m => {
+                if (m.isAudio && m.expiresAt) {
+                  return new Date(m.expiresAt) > currentTime;
+                }
+                return true;
+              });
+
               ws.send(JSON.stringify({
                 type: 'History',
                 data: {
                   code: currentChannel,
-                  messages: channel.messages
+                  messages: filteredMessages
                 }
               }));
             }
