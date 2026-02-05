@@ -68,6 +68,7 @@
             flex: 1;
             display: flex;
             overflow: hidden;
+            min-height: 0; /* Critical for flexbox scroll */
         }
 
         /* Sidebar - Channel List */
@@ -78,6 +79,8 @@
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
+            min-height: 0; /* Critical for flexbox scroll */
+            overflow: hidden;
         }
         .sidebar-header {
             padding: 12px;
@@ -106,13 +109,17 @@
         .channel-list {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            min-height: 0; /* Critical for flexbox scroll */
         }
         .channel-item {
             padding: 12px;
             border-bottom: 1px solid var(--border);
             cursor: pointer;
             transition: background 0.1s;
+            touch-action: manipulation;
         }
         .channel-item:hover { background: rgba(0,255,0,0.05); }
         .channel-item.active { background: rgba(0,255,0,0.1); border-left: 3px solid var(--accent); }
@@ -122,15 +129,18 @@
             font-size: 0.85rem;
             letter-spacing: 0.05em;
             margin-bottom: 4px;
+            pointer-events: none;
         }
         .channel-meta {
             font-size: 0.6rem;
             color: var(--text-dim);
+            pointer-events: none;
         }
         .channel-status {
             float: right;
             font-size: 0.6rem;
             color: var(--accent);
+            pointer-events: none;
         }
         .channel-status.offline { color: var(--text-dim); }
 
@@ -140,6 +150,8 @@
             display: flex;
             flex-direction: column;
             min-width: 0;
+            min-height: 0; /* Critical for flexbox scroll */
+            overflow: hidden;
         }
 
         /* Welcome Screen */
@@ -198,6 +210,8 @@
             display: none;
             flex-direction: column;
             flex: 1;
+            min-height: 0; /* Critical for flexbox scroll */
+            overflow: hidden;
         }
         .chat-view.active { display: flex; }
 
@@ -293,7 +307,10 @@
         .messages {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            min-height: 0; /* Critical for flexbox scroll */
             padding: 12px;
             display: flex;
             flex-direction: column;
