@@ -1,23 +1,26 @@
 // Sovereign Relay Server for Deno Deploy
-// Channels with persistent message history and agent aliases
+// Channels with persistent message history using Deno KV
 
 interface Message {
   id: string;
   alias: string;
   content: string;
-  timestamp: Date;
+  timestamp: string; // ISO string for KV storage
 }
 
-interface ChannelStats {
+interface ChannelData {
   code: string;
-  created: Date;
+  created: string;
   messages: Message[];
   totalPeersEver: number;
-  currentPeers: Map<WebSocket, string>; // ws -> alias
-  lastActivity: Date;
+  lastActivity: string;
 }
 
-const channels = new Map<string, ChannelStats>();
+// Deno KV for persistence
+const kv = await Deno.openKv();
+
+// In-memory peer tracking (can't persist WebSocket connections)
+const channelPeers = new Map<string, Map<WebSocket, string>>(); // channelCode -> (ws -> alias)
 
 // Fun random aliases
 const adjectives = ['Swift', 'Silent', 'Bright', 'Dark', 'Wild', 'Calm', 'Bold', 'Wise', 'Free', 'Noble', 'Stark', 'Keen', 'True', 'Pure', 'Brave', 'Deft', 'Grim', 'Pale', 'Warm', 'Cool'];
@@ -43,48 +46,76 @@ function generateMessageId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+async function getChannel(code: string): Promise<ChannelData | null> {
+  const result = await kv.get<ChannelData>(["channels", code]);
+  return result.value;
+}
+
+async function saveChannel(channel: ChannelData): Promise<void> {
+  await kv.set(["channels", channel.code], channel);
+}
+
+async function getAllChannels(): Promise<ChannelData[]> {
+  const channels: ChannelData[] = [];
+  const iter = kv.list<ChannelData>({ prefix: ["channels"] });
+  for await (const entry of iter) {
+    channels.push(entry.value);
+  }
+  return channels;
+}
+
+function getPeers(code: string): Map<WebSocket, string> {
+  if (!channelPeers.has(code)) {
+    channelPeers.set(code, new Map());
+  }
+  return channelPeers.get(code)!;
+}
+
 function broadcast(channelCode: string, message: string, exclude?: WebSocket) {
-  const channel = channels.get(channelCode);
-  if (channel) {
-    for (const [ws] of channel.currentPeers) {
-      if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
-      }
+  const peers = getPeers(channelCode);
+  for (const [ws] of peers) {
+    if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
+      ws.send(message);
     }
   }
 }
 
-function getChannelLeaderboard() {
-  const allChannels = Array.from(channels.values());
+async function getChannelLeaderboard() {
+  const allChannels = await getAllChannels();
 
   const sorted = allChannels.sort((a, b) => {
-    const scoreA = a.messages.length + (a.currentPeers.size * 100);
-    const scoreB = b.messages.length + (b.currentPeers.size * 100);
+    const peersA = getPeers(a.code).size;
+    const peersB = getPeers(b.code).size;
+    const scoreA = a.messages.length + (peersA * 100);
+    const scoreB = b.messages.length + (peersB * 100);
     return scoreB - scoreA;
   });
 
-  return sorted.map(channel => ({
-    code: channel.code,
-    created: channel.created.toISOString(),
-    messageCount: channel.messages.length,
-    totalPeersEver: channel.totalPeersEver,
-    currentPeers: channel.currentPeers.size,
-    activeAliases: Array.from(channel.currentPeers.values()),
-    lastActivity: channel.lastActivity.toISOString(),
-    isActive: channel.currentPeers.size > 0,
-    recentMessages: channel.messages.slice(-5).map(m => ({
-      alias: m.alias,
-      preview: m.content.substring(0, 50) + (m.content.length > 50 ? '...' : ''),
-      time: m.timestamp.toISOString()
-    }))
-  }));
+  return sorted.map(channel => {
+    const peers = getPeers(channel.code);
+    return {
+      code: channel.code,
+      created: channel.created,
+      messageCount: channel.messages.length,
+      totalPeersEver: channel.totalPeersEver,
+      currentPeers: peers.size,
+      activeAliases: Array.from(peers.values()),
+      lastActivity: channel.lastActivity,
+      isActive: peers.size > 0,
+      recentMessages: channel.messages.slice(-5).map(m => ({
+        alias: m.alias,
+        preview: m.content.substring(0, 50) + (m.content.length > 50 ? '...' : ''),
+        time: m.timestamp
+      }))
+    };
+  });
 }
 
 function handleWebSocket(ws: WebSocket) {
   let currentChannel: string | null = null;
   let myAlias: string = generateAlias();
 
-  ws.onmessage = (event) => {
+  ws.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);
 
@@ -92,29 +123,27 @@ function handleWebSocket(ws: WebSocket) {
         case 'CreateChannel':
         case 'CreateRoom': {
           let code = generateChannelCode();
-          while (channels.has(code)) {
+          while (await getChannel(code)) {
             code = generateChannelCode();
           }
 
-          const now = new Date();
-          const channel: ChannelStats = {
+          const now = new Date().toISOString();
+          const channel: ChannelData = {
             code,
             created: now,
-            messages: [],
+            messages: [{
+              id: generateMessageId(),
+              alias: 'SYSTEM',
+              content: `Channel ${code} created by ${myAlias}`,
+              timestamp: now
+            }],
             totalPeersEver: 1,
-            currentPeers: new Map([[ws, myAlias]]),
             lastActivity: now
           };
-          channels.set(code, channel);
-          currentChannel = code;
 
-          // Add system message
-          channel.messages.push({
-            id: generateMessageId(),
-            alias: 'SYSTEM',
-            content: `Channel ${code} created by ${myAlias}`,
-            timestamp: now
-          });
+          await saveChannel(channel);
+          getPeers(code).set(ws, myAlias);
+          currentChannel = code;
 
           ws.send(JSON.stringify({
             type: 'ChannelCreated',
@@ -123,12 +152,6 @@ function handleWebSocket(ws: WebSocket) {
               alias: myAlias,
               history: channel.messages
             }
-          }));
-
-          // Also send old format for compatibility
-          ws.send(JSON.stringify({
-            type: 'RoomCreated',
-            data: { code }
           }));
 
           console.log(`Channel created: ${code} by ${myAlias}`);
@@ -146,8 +169,8 @@ function handleWebSocket(ws: WebSocket) {
             break;
           }
 
-          let channel = channels.get(code);
-          const now = new Date();
+          let channel = await getChannel(code);
+          const now = new Date().toISOString();
 
           if (!channel) {
             channel = {
@@ -155,10 +178,8 @@ function handleWebSocket(ws: WebSocket) {
               created: now,
               messages: [],
               totalPeersEver: 0,
-              currentPeers: new Map(),
               lastActivity: now
             };
-            channels.set(code, channel);
           }
 
           // Notify existing peers
@@ -168,12 +189,9 @@ function handleWebSocket(ws: WebSocket) {
           }));
 
           // Join channel
-          channel.currentPeers.set(ws, myAlias);
+          getPeers(code).set(ws, myAlias);
           channel.totalPeersEver++;
           channel.lastActivity = now;
-          currentChannel = code;
-
-          // Add system message
           channel.messages.push({
             id: generateMessageId(),
             alias: 'SYSTEM',
@@ -181,34 +199,31 @@ function handleWebSocket(ws: WebSocket) {
             timestamp: now
           });
 
-          // Send channel history to new joiner
+          await saveChannel(channel);
+          currentChannel = code;
+
+          const peers = getPeers(code);
           ws.send(JSON.stringify({
             type: 'ChannelJoined',
             data: {
               code,
               alias: myAlias,
-              peer_count: channel.currentPeers.size,
-              activeAliases: Array.from(channel.currentPeers.values()),
+              peer_count: peers.size,
+              activeAliases: Array.from(peers.values()),
               history: channel.messages
             }
           }));
 
-          // Also send old format for compatibility
-          ws.send(JSON.stringify({
-            type: 'Joined',
-            data: { code, peer_count: channel.currentPeers.size }
-          }));
-
-          console.log(`${myAlias} joined channel: ${code} (${channel.currentPeers.size} peers)`);
+          console.log(`${myAlias} joined channel: ${code} (${peers.size} peers)`);
           break;
         }
 
         case 'Broadcast':
         case 'Forward': {
           if (currentChannel) {
-            const channel = channels.get(currentChannel);
+            const channel = await getChannel(currentChannel);
             if (channel) {
-              const now = new Date();
+              const now = new Date().toISOString();
               const content = msg.data?.data || msg.data?.content || '';
 
               const message: Message = {
@@ -220,14 +235,16 @@ function handleWebSocket(ws: WebSocket) {
 
               channel.messages.push(message);
               channel.lastActivity = now;
+              await saveChannel(channel);
 
-              // Broadcast to all including sender (so they see their alias)
+              // Broadcast to all including sender
               const broadcastMsg = JSON.stringify({
                 type: 'Broadcast',
                 data: message
               });
 
-              for (const [peerWs] of channel.currentPeers) {
+              const peers = getPeers(currentChannel);
+              for (const [peerWs] of peers) {
                 if (peerWs.readyState === WebSocket.OPEN) {
                   peerWs.send(broadcastMsg);
                 }
@@ -239,7 +256,7 @@ function handleWebSocket(ws: WebSocket) {
 
         case 'GetHistory': {
           if (currentChannel) {
-            const channel = channels.get(currentChannel);
+            const channel = await getChannel(currentChannel);
             if (channel) {
               ws.send(JSON.stringify({
                 type: 'History',
@@ -254,12 +271,14 @@ function handleWebSocket(ws: WebSocket) {
         }
 
         case 'GetStats': {
+          const allChannels = await getAllChannels();
+          const activeCount = allChannels.filter(c => getPeers(c.code).size > 0).length;
           ws.send(JSON.stringify({
             type: 'Stats',
             data: {
-              totalChannels: channels.size,
-              activeChannels: Array.from(channels.values()).filter(c => c.currentPeers.size > 0).length,
-              leaderboard: getChannelLeaderboard().slice(0, 20)
+              totalChannels: allChannels.length,
+              activeChannels: activeCount,
+              leaderboard: (await getChannelLeaderboard()).slice(0, 20)
             }
           }));
           break;
@@ -275,27 +294,28 @@ function handleWebSocket(ws: WebSocket) {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = async () => {
     if (currentChannel) {
-      const channel = channels.get(currentChannel);
-      if (channel) {
-        channel.currentPeers.delete(ws);
+      const peers = getPeers(currentChannel);
+      peers.delete(ws);
 
-        // Add system message
+      const channel = await getChannel(currentChannel);
+      if (channel) {
         channel.messages.push({
           id: generateMessageId(),
           alias: 'SYSTEM',
           content: `${myAlias} left the channel`,
-          timestamp: new Date()
+          timestamp: new Date().toISOString()
         });
-
-        broadcast(currentChannel, JSON.stringify({
-          type: 'PeerLeft',
-          data: { alias: myAlias }
-        }));
-
-        console.log(`${myAlias} left channel: ${currentChannel} (${channel.currentPeers.size} remaining)`);
+        await saveChannel(channel);
       }
+
+      broadcast(currentChannel, JSON.stringify({
+        type: 'PeerLeft',
+        data: { alias: myAlias }
+      }));
+
+      console.log(`${myAlias} left channel: ${currentChannel} (${peers.size} remaining)`);
     }
   };
 
@@ -304,13 +324,13 @@ function handleWebSocket(ws: WebSocket) {
   };
 }
 
-function generateStatsHTML(url: URL): string {
-  const allChannels = Array.from(channels.values());
-  const activeChannels = allChannels.filter(c => c.currentPeers.size > 0);
+async function generateStatsHTML(url: URL): Promise<string> {
+  const allChannels = await getAllChannels();
+  const activeChannels = allChannels.filter(c => getPeers(c.code).size > 0);
   const totalMessages = allChannels.reduce((sum, c) => sum + c.messages.length, 0);
-  const totalPeers = allChannels.reduce((sum, c) => sum + c.currentPeers.size, 0);
+  const totalPeers = allChannels.reduce((sum, c) => sum + getPeers(c.code).size, 0);
 
-  const leaderboard = getChannelLeaderboard().slice(0, 25);
+  const leaderboard = (await getChannelLeaderboard()).slice(0, 25);
 
   const channelRows = leaderboard.map((channel, i) => `
     <tr style="background: ${channel.isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent'}">
@@ -371,7 +391,7 @@ function generateStatsHTML(url: URL): string {
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${channels.size}</div>
+          <div class="stat-value">${allChannels.length}</div>
           <div class="stat-label">Total Channels</div>
         </div>
         <div class="stat-card">
@@ -417,7 +437,7 @@ function generateStatsHTML(url: URL): string {
   `;
 }
 
-Deno.serve({ port: 8000 }, (req) => {
+Deno.serve({ port: 8000 }, async (req) => {
   const url = new URL(req.url);
 
   if (url.pathname === '/health') {
@@ -425,10 +445,12 @@ Deno.serve({ port: 8000 }, (req) => {
   }
 
   if (url.pathname === '/api/stats') {
+    const allChannels = await getAllChannels();
+    const activeCount = allChannels.filter(c => getPeers(c.code).size > 0).length;
     return new Response(JSON.stringify({
-      totalChannels: channels.size,
-      activeChannels: Array.from(channels.values()).filter(c => c.currentPeers.size > 0).length,
-      leaderboard: getChannelLeaderboard()
+      totalChannels: allChannels.length,
+      activeChannels: activeCount,
+      leaderboard: await getChannelLeaderboard()
     }), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
@@ -440,9 +462,9 @@ Deno.serve({ port: 8000 }, (req) => {
     return response;
   }
 
-  return new Response(generateStatsHTML(url), {
+  return new Response(await generateStatsHTML(url), {
     headers: { 'Content-Type': 'text/html' },
   });
 });
 
-console.log('Sovereign Relay running on port 8000');
+console.log('Sovereign Relay running on port 8000 with Deno KV persistence');
