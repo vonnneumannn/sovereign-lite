@@ -14,7 +14,7 @@ function escapeHtml(str: string): string {
 // Security: Rate limiting
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const MAX_MESSAGES_PER_WINDOW = 100;
-const MAX_CONNECTIONS_PER_IP = 10;
+const MAX_CONNECTIONS_PER_IP = 50; // Increased to allow bots and multiple tabs
 const MAX_MESSAGE_SIZE = 65536; // 64KB
 
 const rateLimits = new Map<string, { count: number; reset: number }>();
