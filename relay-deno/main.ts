@@ -69,15 +69,7 @@ function handleWebSocket(ws: WebSocket) {
             rooms.set(code, room);
           }
 
-          if (room.size >= 3) {
-            ws.send(JSON.stringify({
-              type: 'Error',
-              data: { message: 'Room is full (max 3 peers)' }
-            }));
-            break;
-          }
-
-          // Notify existing peer
+          // Notify existing peers
           broadcast(code, JSON.stringify({ type: 'PeerJoined' }));
 
           // Join room
