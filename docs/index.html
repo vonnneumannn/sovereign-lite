@@ -106,7 +106,7 @@
         .github-link { position: fixed; top: 16px; right: 16px; color: var(--text-secondary); z-index: 100; }
 
         /* Leaderboard toggle button */
-        .leaderboard-toggle {
+        .leaderboard-toggle, .voice-toggle {
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             color: var(--accent-light);
@@ -119,8 +119,84 @@
             gap: 6px;
             transition: all 0.2s;
         }
-        .leaderboard-toggle:hover { background: var(--border); }
+        .leaderboard-toggle:hover, .voice-toggle:hover { background: var(--border); }
         .leaderboard-toggle.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .voice-toggle.active { background: var(--success); color: white; border-color: var(--success); }
+        .voice-toggle.active:hover { background: #16a34a; }
+
+        /* Voice channel styles */
+        .voice-panel {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 16px;
+            display: none;
+        }
+        .voice-panel.active { display: block; }
+        .voice-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .voice-panel-title {
+            font-size: 0.75rem;
+            color: var(--success);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .voice-panel-title .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        .voice-participants {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .voice-participant {
+            background: var(--bg-tertiary);
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .voice-participant.speaking {
+            border: 2px solid var(--success);
+            animation: speaking 0.5s infinite alternate;
+        }
+        @keyframes speaking {
+            from { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            to { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+        }
+        .voice-participant .mic-icon { font-size: 0.875rem; }
+        .voice-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .voice-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .voice-btn:hover { background: var(--border); }
+        .voice-btn.muted { color: var(--error); border-color: var(--error); }
+        .voice-btn.leave { color: var(--error); }
+        .voice-btn.leave:hover { background: rgba(239, 68, 68, 0.2); }
 
         /* Sidebar styles */
         .sidebar {
@@ -223,9 +299,11 @@
         <div id="setupScreen" class="screen active centered">
             <div class="logo">🔐</div>
             <h2>Sovereign Chat</h2>
-            <p class="subtitle">Persistent channels with message history</p>
+            <p class="subtitle">Persistent channels with message history & voice</p>
             <div class="info-box">
                 📡 Messages are stored on the relay. Join any channel to see its full history.
+                <br><br>
+                🎙️ Voice chat available in every channel!
             </div>
             <div style="width: 100%;">
                 <button class="btn btn-primary" id="startBtn">Connect to Relay</button>
@@ -272,12 +350,38 @@
                             <div class="chat-info"><span id="peerCount">0</span> online</div>
                         </div>
                         <div class="chat-header-buttons">
+                            <button class="voice-toggle" id="voiceToggle" title="Join Voice Channel">
+                                <span>🎙️</span> Voice
+                            </button>
                             <button class="leaderboard-toggle" id="leaderboardToggle">
                                 <span>📊</span> Channels
                             </button>
                             <button class="btn-secondary" id="endChatBtn" style="padding: 8px 16px; width: auto; margin: 0;">Leave</button>
                         </div>
                     </div>
+
+                    <!-- Voice Panel -->
+                    <div class="voice-panel" id="voicePanel">
+                        <div class="voice-panel-header">
+                            <div class="voice-panel-title">
+                                <span class="pulse-dot"></span>
+                                Voice Channel Active
+                            </div>
+                            <span id="voiceParticipantCount" style="font-size: 0.7rem; color: var(--text-muted);">0 in voice</span>
+                        </div>
+                        <div class="voice-participants" id="voiceParticipants">
+                            <!-- Participants will be added here -->
+                        </div>
+                        <div class="voice-controls">
+                            <button class="voice-btn" id="muteBtn">
+                                <span>🎤</span> Mute
+                            </button>
+                            <button class="voice-btn leave" id="leaveVoiceBtn">
+                                <span>📴</span> Leave Voice
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="messages" id="messagesContainer"></div>
                     <div class="chat-input">
                         <input type="text" id="messageInput" placeholder="Type a message... (use @CLAUDE to talk to Claude)">
@@ -315,12 +419,30 @@
         </div>
     </div>
 
+    <!-- Hidden audio elements for voice chat -->
+    <div id="audioContainer" style="display: none;"></div>
+
     <script>
         let ws = null;
         let channelCode = null;
         let myAlias = null;
         let peerCount = 0;
         let sidebarOpen = false;
+
+        // Voice chat state
+        let inVoice = false;
+        let isMuted = false;
+        let localStream = null;
+        let peerConnections = {}; // peerId -> RTCPeerConnection
+        let voiceParticipants = new Set();
+
+        // ICE servers for WebRTC
+        const iceServers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
 
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -395,6 +517,7 @@
 
             ws.onclose = () => {
                 updateStatus('Disconnected');
+                leaveVoiceChannel();
             };
         }
 
@@ -410,7 +533,6 @@
                     document.getElementById('messagesContainer').innerHTML = '';
                     updatePeerCount(1);
 
-                    // Load history
                     if (msg.data.history) {
                         msg.data.history.forEach(m => {
                             if (m.alias === 'SYSTEM') {
@@ -434,7 +556,6 @@
                     document.getElementById('messagesContainer').innerHTML = '';
                     updatePeerCount(msg.data.peer_count || 1);
 
-                    // Load history
                     if (msg.data.history) {
                         msg.data.history.forEach(m => {
                             if (m.alias === 'SYSTEM') {
@@ -451,18 +572,15 @@
                     break;
 
                 case 'RoomCreated':
-                    // Backward compat - ignore, we use ChannelCreated
                     break;
 
                 case 'Joined':
-                    // Backward compat - use peer count
                     if (msg.data.peer_count) {
                         updatePeerCount(msg.data.peer_count);
                     }
                     break;
 
                 case 'Broadcast':
-                    // New message from channel
                     const m = msg.data;
                     if (m.alias === 'SYSTEM') {
                         addSystemMessage(m.content);
@@ -482,11 +600,12 @@
                     updatePeerCount(Math.max(1, peerCount - 1));
                     if (msg.data && msg.data.alias) {
                         showToast(msg.data.alias + ' left', 'error');
+                        // Remove from voice if they were in it
+                        removeVoiceParticipant(msg.data.alias);
                     }
                     break;
 
                 case 'Message':
-                    // Old format - try to display
                     if (msg.data && msg.data.data) {
                         addMessage('Unknown', msg.data.data, false);
                     }
@@ -494,6 +613,27 @@
 
                 case 'Error':
                     showToast(msg.data.message, 'error');
+                    break;
+
+                // Voice signaling messages
+                case 'VoiceJoin':
+                    handleVoiceJoin(msg.data);
+                    break;
+
+                case 'VoiceLeave':
+                    handleVoiceLeave(msg.data);
+                    break;
+
+                case 'VoiceOffer':
+                    handleVoiceOffer(msg.data);
+                    break;
+
+                case 'VoiceAnswer':
+                    handleVoiceAnswer(msg.data);
+                    break;
+
+                case 'VoiceIceCandidate':
+                    handleVoiceIceCandidate(msg.data);
                     break;
             }
         }
@@ -509,6 +649,7 @@
                 showToast('Enter a channel code', 'error');
                 return;
             }
+            leaveVoiceChannel();
             ws.send(JSON.stringify({ type: 'JoinChannel', data: { code } }));
         }
 
@@ -526,6 +667,7 @@
         }
 
         function leaveChannel() {
+            leaveVoiceChannel();
             channelCode = null;
             document.getElementById('messagesContainer').innerHTML = '';
             closeSidebar();
@@ -533,7 +675,324 @@
             loadLeaderboard();
         }
 
-        // Sidebar functions
+        // ==================== VOICE CHAT FUNCTIONS ====================
+
+        async function joinVoiceChannel() {
+            if (inVoice) return;
+
+            try {
+                // Request microphone access
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+                inVoice = true;
+                isMuted = false;
+
+                // Update UI
+                document.getElementById('voiceToggle').classList.add('active');
+                document.getElementById('voicePanel').classList.add('active');
+                document.getElementById('muteBtn').classList.remove('muted');
+                document.getElementById('muteBtn').innerHTML = '<span>🎤</span> Mute';
+
+                // Add self to participants
+                addVoiceParticipant(myAlias, true);
+
+                // Notify others
+                ws.send(JSON.stringify({
+                    type: 'Broadcast',
+                    data: { content: `🎙️ ${myAlias} joined voice chat` }
+                }));
+
+                // Send voice join signal to initiate WebRTC with existing participants
+                ws.send(JSON.stringify({
+                    type: 'Broadcast',
+                    data: {
+                        content: JSON.stringify({
+                            _voice: true,
+                            type: 'VoiceJoin',
+                            alias: myAlias
+                        })
+                    }
+                }));
+
+                showToast('Joined voice channel', 'success');
+
+            } catch (err) {
+                console.error('Failed to access microphone:', err);
+                showToast('Could not access microphone', 'error');
+            }
+        }
+
+        function leaveVoiceChannel() {
+            if (!inVoice) return;
+
+            // Stop local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            // Close all peer connections
+            Object.values(peerConnections).forEach(pc => pc.close());
+            peerConnections = {};
+
+            // Clear audio elements
+            document.getElementById('audioContainer').innerHTML = '';
+
+            // Update state
+            inVoice = false;
+            isMuted = false;
+            voiceParticipants.clear();
+
+            // Update UI
+            document.getElementById('voiceToggle').classList.remove('active');
+            document.getElementById('voicePanel').classList.remove('active');
+            document.getElementById('voiceParticipants').innerHTML = '';
+            updateVoiceParticipantCount();
+
+            // Notify others
+            if (ws && ws.readyState === WebSocket.OPEN && myAlias) {
+                ws.send(JSON.stringify({
+                    type: 'Broadcast',
+                    data: { content: `📴 ${myAlias} left voice chat` }
+                }));
+
+                ws.send(JSON.stringify({
+                    type: 'Broadcast',
+                    data: {
+                        content: JSON.stringify({
+                            _voice: true,
+                            type: 'VoiceLeave',
+                            alias: myAlias
+                        })
+                    }
+                }));
+            }
+        }
+
+        function toggleMute() {
+            if (!localStream) return;
+
+            isMuted = !isMuted;
+            localStream.getAudioTracks().forEach(track => {
+                track.enabled = !isMuted;
+            });
+
+            const muteBtn = document.getElementById('muteBtn');
+            if (isMuted) {
+                muteBtn.classList.add('muted');
+                muteBtn.innerHTML = '<span>🔇</span> Unmute';
+            } else {
+                muteBtn.classList.remove('muted');
+                muteBtn.innerHTML = '<span>🎤</span> Mute';
+            }
+
+            // Update participant display
+            updateVoiceParticipantDisplay(myAlias, !isMuted);
+        }
+
+        function addVoiceParticipant(alias, isSelf = false) {
+            voiceParticipants.add(alias);
+            updateVoiceParticipantCount();
+
+            const container = document.getElementById('voiceParticipants');
+            if (document.getElementById('voice-' + alias)) return;
+
+            const el = document.createElement('div');
+            el.className = 'voice-participant';
+            el.id = 'voice-' + alias;
+            el.innerHTML = `<span class="mic-icon">🎤</span> ${alias}${isSelf ? ' (you)' : ''}`;
+            container.appendChild(el);
+        }
+
+        function removeVoiceParticipant(alias) {
+            voiceParticipants.delete(alias);
+            updateVoiceParticipantCount();
+
+            const el = document.getElementById('voice-' + alias);
+            if (el) el.remove();
+
+            // Close peer connection if exists
+            if (peerConnections[alias]) {
+                peerConnections[alias].close();
+                delete peerConnections[alias];
+            }
+
+            // Remove audio element
+            const audio = document.getElementById('audio-' + alias);
+            if (audio) audio.remove();
+        }
+
+        function updateVoiceParticipantCount() {
+            document.getElementById('voiceParticipantCount').textContent = voiceParticipants.size + ' in voice';
+        }
+
+        function updateVoiceParticipantDisplay(alias, speaking) {
+            const el = document.getElementById('voice-' + alias);
+            if (el) {
+                el.querySelector('.mic-icon').textContent = speaking ? '🎤' : '🔇';
+            }
+        }
+
+        // WebRTC signaling handlers
+        function handleVoiceJoin(data) {
+            if (data.alias === myAlias || !inVoice) return;
+
+            addVoiceParticipant(data.alias);
+
+            // Create offer for the new participant
+            createPeerConnection(data.alias, true);
+        }
+
+        function handleVoiceLeave(data) {
+            removeVoiceParticipant(data.alias);
+        }
+
+        async function createPeerConnection(peerAlias, createOffer) {
+            if (peerConnections[peerAlias]) return peerConnections[peerAlias];
+
+            const pc = new RTCPeerConnection(iceServers);
+            peerConnections[peerAlias] = pc;
+
+            // Add local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+            }
+
+            // Handle incoming stream
+            pc.ontrack = (event) => {
+                const audio = document.createElement('audio');
+                audio.id = 'audio-' + peerAlias;
+                audio.srcObject = event.streams[0];
+                audio.autoplay = true;
+                document.getElementById('audioContainer').appendChild(audio);
+            };
+
+            // Handle ICE candidates
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'Broadcast',
+                        data: {
+                            content: JSON.stringify({
+                                _voice: true,
+                                type: 'VoiceIceCandidate',
+                                from: myAlias,
+                                to: peerAlias,
+                                candidate: event.candidate
+                            })
+                        }
+                    }));
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                console.log(`Connection to ${peerAlias}: ${pc.connectionState}`);
+            };
+
+            if (createOffer) {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                ws.send(JSON.stringify({
+                    type: 'Broadcast',
+                    data: {
+                        content: JSON.stringify({
+                            _voice: true,
+                            type: 'VoiceOffer',
+                            from: myAlias,
+                            to: peerAlias,
+                            offer: offer
+                        })
+                    }
+                }));
+            }
+
+            return pc;
+        }
+
+        async function handleVoiceOffer(data) {
+            if (data.to !== myAlias || !inVoice) return;
+
+            addVoiceParticipant(data.from);
+
+            const pc = await createPeerConnection(data.from, false);
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            ws.send(JSON.stringify({
+                type: 'Broadcast',
+                data: {
+                    content: JSON.stringify({
+                        _voice: true,
+                        type: 'VoiceAnswer',
+                        from: myAlias,
+                        to: data.from,
+                        answer: answer
+                    })
+                }
+            }));
+        }
+
+        async function handleVoiceAnswer(data) {
+            if (data.to !== myAlias) return;
+
+            const pc = peerConnections[data.from];
+            if (pc) {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+        }
+
+        async function handleVoiceIceCandidate(data) {
+            if (data.to !== myAlias) return;
+
+            const pc = peerConnections[data.from];
+            if (pc) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        }
+
+        // Override handleMessage to detect voice signaling in broadcasts
+        const originalHandleMessage = handleMessage;
+        handleMessage = function(msg) {
+            // Check if it's a voice signaling message embedded in broadcast
+            if (msg.type === 'Broadcast' && msg.data && msg.data.content) {
+                try {
+                    const content = msg.data.content;
+                    if (content.startsWith('{') && content.includes('"_voice":true')) {
+                        const voiceData = JSON.parse(content);
+                        if (voiceData._voice) {
+                            switch (voiceData.type) {
+                                case 'VoiceJoin':
+                                    handleVoiceJoin(voiceData);
+                                    return;
+                                case 'VoiceLeave':
+                                    handleVoiceLeave(voiceData);
+                                    return;
+                                case 'VoiceOffer':
+                                    handleVoiceOffer(voiceData);
+                                    return;
+                                case 'VoiceAnswer':
+                                    handleVoiceAnswer(voiceData);
+                                    return;
+                                case 'VoiceIceCandidate':
+                                    handleVoiceIceCandidate(voiceData);
+                                    return;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Not JSON, treat as normal message
+                }
+            }
+            originalHandleMessage(msg);
+        };
+
+        // ==================== SIDEBAR FUNCTIONS ====================
+
         function toggleSidebar() {
             const sidebar = document.getElementById('leaderboardSidebar');
             const toggle = document.getElementById('leaderboardToggle');
@@ -558,11 +1017,9 @@
                 const response = await fetch('https://clear-cat-32.deno.dev/api/stats');
                 const data = await response.json();
 
-                // Update sidebar stats
                 document.getElementById('statTotalChannels').textContent = data.totalChannels || 0;
                 document.getElementById('statActiveChannels').textContent = data.activeChannels || 0;
 
-                // Render channel lists
                 const leaderboard = data.leaderboard || [];
                 renderChannelList('sidebarChannelList', leaderboard);
                 renderChannelList('dashboardChannelList', leaderboard.slice(0, 5));
@@ -619,6 +1076,17 @@
         document.getElementById('sidebarClose').onclick = closeSidebar;
         document.getElementById('sidebarRefreshBtn').onclick = loadLeaderboard;
         document.getElementById('dashboardRefreshBtn').onclick = loadLeaderboard;
+
+        // Voice controls
+        document.getElementById('voiceToggle').onclick = () => {
+            if (inVoice) {
+                leaveVoiceChannel();
+            } else {
+                joinVoiceChannel();
+            }
+        };
+        document.getElementById('muteBtn').onclick = toggleMute;
+        document.getElementById('leaveVoiceBtn').onclick = leaveVoiceChannel;
     </script>
 </body>
 </html>
