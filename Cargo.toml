@@ -1,0 +1,62 @@
+[package]
+name = "sovereign-lite"
+version = "0.1.0"
+edition = "2021"
+description = "Two-party secure communication with contract signing"
+license = "MIT"
+readme = "README.md"
+
+[lib]
+name = "sovereign"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sovereign-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "sovereign-relay"
+path = "src/bin/relay.rs"
+
+[dependencies]
+# Cryptography
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
+blake3 = "1.5"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Security
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+
+# Error handling
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Utilities
+base64 = "0.21"
+hex = "0.4"
+async-trait = "0.1"
+dirs = "5.0"
+uuid = { version = "1.0", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+proptest = "1.4"
+tokio-test = "0.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
