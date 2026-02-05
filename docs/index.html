@@ -453,6 +453,17 @@
     </div>
 
     <script>
+        // Configuration - relay URL can be set via URL params or localStorage
+        // Usage: ?relay=wss://your-relay.com or localStorage.setItem('relayUrl', 'wss://...')
+        const DEFAULT_RELAY = 'wss://clear-cat-32.deno.dev';
+        function getRelayConfig() {
+            const params = new URLSearchParams(window.location.search);
+            const relay = params.get('relay') || localStorage.getItem('relayUrl') || DEFAULT_RELAY;
+            const api = relay.replace('wss://', 'https://').replace('ws://', 'http://');
+            return { relay, api };
+        }
+        const config = getRelayConfig();
+
         // State
         let ws = null;
         let currentChannel = null;
@@ -483,7 +494,7 @@
         // Connect
         function connect() {
             $('statusText').textContent = 'CONNECTING';
-            ws = new WebSocket('wss://clear-cat-32.deno.dev');
+            ws = new WebSocket(config.relay);
 
             ws.onopen = () => {
                 $('statusText').textContent = 'ONLINE';
@@ -584,7 +595,7 @@
             } else {
                 const isVoice = m.content?.startsWith('🎙️');
                 div.innerHTML = `
-                    <div class="msg-alias">${m.alias}</div>
+                    <div class="msg-alias">${escapeHtml(m.alias)}</div>
                     <div class="msg-text ${isVoice ? 'voice' : ''}">${escapeHtml(m.content)}</div>
                 `;
             }
@@ -600,7 +611,7 @@
         // Channels
         async function loadChannels() {
             try {
-                const res = await fetch('https://clear-cat-32.deno.dev/api/stats');
+                const res = await fetch(config.api + '/api/stats');
                 const data = await res.json();
                 channels = data.leaderboard || [];
                 renderChannels();
@@ -608,13 +619,18 @@
         }
 
         function renderChannels() {
-            $('channelList').innerHTML = channels.map(ch => `
-                <div class="channel-item ${ch.code === currentChannel ? 'active' : ''}" data-code="${ch.code}">
-                    <span class="channel-status ${ch.currentPeers > 0 ? '' : 'offline'}">${ch.currentPeers > 0 ? ch.currentPeers + ' ON' : 'OFF'}</span>
-                    <div class="channel-name">${ch.code}</div>
-                    <div class="channel-meta">${ch.messageCount} msgs</div>
+            $('channelList').innerHTML = channels.map(ch => {
+                // Security: Sanitize all server-provided data to prevent XSS
+                const code = escapeHtml(ch.code);
+                const msgs = parseInt(ch.messageCount, 10) || 0;
+                const peers = parseInt(ch.currentPeers, 10) || 0;
+                return `
+                <div class="channel-item ${code === currentChannel ? 'active' : ''}" data-code="${code}">
+                    <span class="channel-status ${peers > 0 ? '' : 'offline'}">${peers > 0 ? peers + ' ON' : 'OFF'}</span>
+                    <div class="channel-name">${code}</div>
+                    <div class="channel-meta">${msgs} msgs</div>
                 </div>
-            `).join('') || '<div style="padding:20px;color:var(--text-dim);text-align:center">No channels</div>';
+            `}).join('') || '<div style="padding:20px;color:var(--text-dim);text-align:center">No channels</div>';
         }
 
         function joinChannel(code) {

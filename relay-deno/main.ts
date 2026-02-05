@@ -1,6 +1,62 @@
 // Sovereign Relay Server for Deno Deploy
 // Channels with persistent message history using Deno KV
 
+// Security: HTML escape function to prevent XSS in stats page
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Security: Rate limiting
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_MESSAGES_PER_WINDOW = 100;
+const MAX_CONNECTIONS_PER_IP = 10;
+const MAX_MESSAGE_SIZE = 65536; // 64KB
+
+const rateLimits = new Map<string, { count: number; reset: number }>();
+const connectionCounts = new Map<string, number>();
+
+// CORS: Allowed origins
+const ALLOWED_ORIGINS = [
+  'https://vonnneumannn.github.io',
+  'http://localhost:8000',
+  'http://localhost:3000',
+  'http://127.0.0.1:8000',
+];
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.some(o => origin.startsWith(o));
+}
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const limit = rateLimits.get(ip);
+  if (!limit || now > limit.reset) {
+    rateLimits.set(ip, { count: 1, reset: now + RATE_LIMIT_WINDOW });
+    return true;
+  }
+  if (limit.count >= MAX_MESSAGES_PER_WINDOW) return false;
+  limit.count++;
+  return true;
+}
+
+function addConnection(ip: string): boolean {
+  const count = connectionCounts.get(ip) || 0;
+  if (count >= MAX_CONNECTIONS_PER_IP) return false;
+  connectionCounts.set(ip, count + 1);
+  return true;
+}
+
+function removeConnection(ip: string): void {
+  const count = connectionCounts.get(ip) || 0;
+  if (count > 0) connectionCounts.set(ip, count - 1);
+}
+
 interface Message {
   id: string;
   alias: string;
@@ -113,13 +169,26 @@ async function getChannelLeaderboard() {
   });
 }
 
-function handleWebSocket(ws: WebSocket) {
+function handleWebSocket(ws: WebSocket, clientIp: string = 'unknown') {
   let currentChannel: string | null = null;
   let myAlias: string = generateAlias();
 
   ws.onmessage = async (event) => {
     try {
-      const msg = JSON.parse(event.data);
+      // Security: Check message size
+      const data = typeof event.data === 'string' ? event.data : '';
+      if (data.length > MAX_MESSAGE_SIZE) {
+        ws.send(JSON.stringify({ type: 'Error', data: { message: 'Message too large' } }));
+        return;
+      }
+
+      // Security: Rate limiting
+      if (!checkRateLimit(clientIp)) {
+        ws.send(JSON.stringify({ type: 'Error', data: { message: 'Rate limit exceeded' } }));
+        return;
+      }
+
+      const msg = JSON.parse(data);
 
       switch (msg.type) {
         case 'CreateChannel':
@@ -326,12 +395,13 @@ function handleWebSocket(ws: WebSocket) {
           break;
         }
       }
-    } catch (e) {
-      console.error('Error handling message:', e);
+    } catch (_e) {
+      console.error(`Error handling message from ${clientIp}`);
     }
   };
 
   ws.onclose = async () => {
+    removeConnection(clientIp);
     if (currentChannel) {
       const peers = getPeers(currentChannel);
       peers.delete(ws);
@@ -369,17 +439,21 @@ async function generateStatsHTML(url: URL): Promise<string> {
 
   const leaderboard = (await getChannelLeaderboard()).slice(0, 25);
 
-  const channelRows = leaderboard.map((channel, i) => `
+  const channelRows = leaderboard.map((channel, i) => {
+    // Security: Escape all user-generated content
+    const safeCode = escapeHtml(channel.code);
+    const safeAliases = channel.activeAliases.map(escapeHtml);
+    return `
     <tr style="background: ${channel.isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent'}">
       <td>${i + 1}</td>
-      <td><code style="color: ${channel.isActive ? '#22c55e' : '#818cf8'}">${channel.code}</code></td>
+      <td><code style="color: ${channel.isActive ? '#22c55e' : '#818cf8'}">${safeCode}</code></td>
       <td>${channel.currentPeers} ${channel.isActive ? '🟢' : '⚫'}</td>
-      <td title="${channel.activeAliases.join(', ')}">${channel.activeAliases.slice(0, 3).join(', ')}${channel.activeAliases.length > 3 ? '...' : ''}</td>
+      <td title="${safeAliases.join(', ')}">${safeAliases.slice(0, 3).join(', ')}${safeAliases.length > 3 ? '...' : ''}</td>
       <td>${channel.messageCount}</td>
       <td>${channel.totalPeersEver}</td>
       <td>${new Date(channel.lastActivity).toLocaleString()}</td>
     </tr>
-  `).join('');
+  `}).join('');
 
   return `
     <!DOCTYPE html>
@@ -476,9 +550,29 @@ async function generateStatsHTML(url: URL): Promise<string> {
 
 Deno.serve({ port: 8000 }, async (req) => {
   const url = new URL(req.url);
+  const origin = req.headers.get('origin');
+
+  // CORS headers
+  const corsHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (origin && isOriginAllowed(origin)) {
+    corsHeaders['Access-Control-Allow-Origin'] = origin;
+  }
 
   if (url.pathname === '/health') {
     return new Response('OK', { status: 200 });
+  }
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...corsHeaders,
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      }
+    });
   }
 
   if (url.pathname === '/api/stats') {
@@ -488,14 +582,27 @@ Deno.serve({ port: 8000 }, async (req) => {
       totalChannels: allChannels.length,
       activeChannels: activeCount,
       leaderboard: await getChannelLeaderboard()
-    }), {
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    });
+    }), { headers: corsHeaders });
   }
 
   if (req.headers.get('upgrade') === 'websocket') {
+    // Security: Validate WebSocket origin
+    if (origin && !isOriginAllowed(origin)) {
+      console.warn(`WebSocket rejected from: ${origin}`);
+      return new Response('Forbidden', { status: 403 });
+    }
+
+    // Security: Rate limit connections per IP
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     req.headers.get('cf-connecting-ip') || 'unknown';
+
+    if (!addConnection(clientIp)) {
+      console.warn(`Connection limit exceeded: ${clientIp}`);
+      return new Response('Too Many Connections', { status: 429 });
+    }
+
     const { socket, response } = Deno.upgradeWebSocket(req);
-    handleWebSocket(socket);
+    handleWebSocket(socket, clientIp);
     return response;
   }
 
