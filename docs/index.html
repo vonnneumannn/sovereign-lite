@@ -581,7 +581,10 @@
                     break;
 
                 case 'Broadcast':
-                    addMessage(msg.data);
+                    // Don't add AUDIO or TX signals to chat - they're handled separately
+                    if (!msg.data.content?.startsWith('AUDIO:') && !msg.data.content?.startsWith('TX_')) {
+                        addMessage(msg.data);
+                    }
                     break;
 
                 case 'PeerJoined':

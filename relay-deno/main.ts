@@ -308,8 +308,24 @@ function handleWebSocket(ws: WebSocket, clientIp: string = 'unknown') {
               const nowISO = now.toISOString();
               const content = msg.data?.data || msg.data?.content || '';
 
-              // Check if this is an audio message
+              // Check message type
               const isAudio = content.startsWith('AUDIO:');
+              const isTxSignal = content.startsWith('TX_START:') || content.startsWith('TX_END:');
+
+              // TX signals: broadcast only, don't store
+              if (isTxSignal) {
+                const broadcastMsg = JSON.stringify({
+                  type: 'Broadcast',
+                  data: { id: generateMessageId(), alias: myAlias, content, timestamp: nowISO }
+                });
+                const peers = getPeers(currentChannel);
+                for (const [peerWs] of peers) {
+                  if (peerWs.readyState === WebSocket.OPEN) {
+                    peerWs.send(broadcastMsg);
+                  }
+                }
+                break;
+              }
 
               const message: Message = {
                 id: generateMessageId(),
@@ -317,8 +333,8 @@ function handleWebSocket(ws: WebSocket, clientIp: string = 'unknown') {
                 content,
                 timestamp: nowISO,
                 isAudio,
-                // Audio expires after 5 minutes
-                expiresAt: isAudio ? new Date(now.getTime() + 5 * 60 * 1000).toISOString() : undefined
+                // Audio expires after 24 hours
+                expiresAt: isAudio ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString() : undefined
               };
 
               // Clean up expired audio messages before adding new one
