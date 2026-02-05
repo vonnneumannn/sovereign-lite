@@ -508,6 +508,25 @@
     </main>
 
     <script>
+        // Configuration - relay URL can be set via URL params or localStorage
+        // Usage: ?relay=wss://your-relay.com or localStorage.setItem('relayUrl', 'wss://...')
+        const DEFAULT_RELAY_URL = 'wss://clear-cat-32.deno.dev';
+        const DEFAULT_API_URL = 'https://clear-cat-32.deno.dev';
+
+        function getRelayConfig() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const paramRelay = urlParams.get('relay');
+            const storedRelay = localStorage.getItem('relayUrl');
+
+            let wsUrl = paramRelay || storedRelay || DEFAULT_RELAY_URL;
+            // Derive API URL from WebSocket URL
+            let apiUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+
+            return { wsUrl, apiUrl };
+        }
+
+        const relayConfig = getRelayConfig();
+
         // State
         let ws = null;
         let channelCode = null;
@@ -552,7 +571,7 @@
             updateStatus('CONNECTING', 'connecting');
             $('connectBtn').disabled = true;
 
-            ws = new WebSocket('wss://clear-cat-32.deno.dev');
+            ws = new WebSocket(relayConfig.wsUrl);
 
             ws.onopen = () => {
                 updateStatus('ONLINE', 'on');
@@ -651,7 +670,7 @@
             } else {
                 const isVoice = m.content?.startsWith('🎙️');
                 div.innerHTML = `
-                    <div class="msg-alias">${m.alias}</div>
+                    <div class="msg-alias">${escapeHtml(m.alias)}</div>
                     <div class="msg-content ${isVoice ? 'msg-voice' : ''}">${escapeHtml(m.content)}</div>
                     <div class="msg-time">${formatTime(m.timestamp)}</div>
                 `;
@@ -939,18 +958,24 @@
 
         async function loadChannels() {
             try {
-                const res = await fetch('https://clear-cat-32.deno.dev/api/stats');
+                const res = await fetch(relayConfig.apiUrl + '/api/stats');
                 const data = await res.json();
                 const list = $('channelList');
-                list.innerHTML = data.leaderboard?.map(ch => `
-                    <div class="channel-item ${ch.code === channelCode ? 'active' : ''}" data-code="${ch.code}">
+                list.innerHTML = data.leaderboard?.map(ch => {
+                    // Sanitize all server-provided data to prevent XSS
+                    const safeCode = escapeHtml(ch.code);
+                    const safeMessageCount = parseInt(ch.messageCount, 10) || 0;
+                    const safeTotalPeers = parseInt(ch.totalPeersEver, 10) || 0;
+                    const safeCurrentPeers = parseInt(ch.currentPeers, 10) || 0;
+                    return `
+                    <div class="channel-item ${safeCode === channelCode ? 'active' : ''}" data-code="${safeCode}">
                         <div>
-                            <div class="channel-code">${ch.code}</div>
-                            <div class="channel-meta">${ch.messageCount} msgs · ${ch.totalPeersEver} visitors</div>
+                            <div class="channel-code">${safeCode}</div>
+                            <div class="channel-meta">${safeMessageCount} msgs · ${safeTotalPeers} visitors</div>
                         </div>
-                        <div class="channel-peers ${ch.currentPeers > 0 ? '' : 'offline'}">${ch.currentPeers > 0 ? ch.currentPeers + ' ON' : 'OFF'}</div>
+                        <div class="channel-peers ${safeCurrentPeers > 0 ? '' : 'offline'}">${safeCurrentPeers > 0 ? safeCurrentPeers + ' ON' : 'OFF'}</div>
                     </div>
-                `).join('') || '<div style="color: var(--text-dim); text-align: center; padding: 20px;">No channels yet</div>';
+                `}).join('') || '<div style="color: var(--text-dim); text-align: center; padding: 20px;">No channels yet</div>';
             } catch (e) {
                 console.error('Failed to load channels:', e);
             }

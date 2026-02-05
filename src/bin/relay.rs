@@ -187,9 +187,9 @@ async fn handle_connection(
                                             current_room = Some(room);
 
                                             let response = RelayMessage::RoomCreated { code };
-                                            let _ = write.send(Message::Text(
-                                                serde_json::to_string(&response).unwrap()
-                                            )).await;
+                                            if let Ok(json) = serde_json::to_string(&response) {
+                                                let _ = write.send(Message::Text(json)).await;
+                                            }
                                         }
                                     }
 
@@ -200,9 +200,9 @@ async fn handle_connection(
                                                 let response = RelayMessage::Error {
                                                     message: "Room is full".to_string(),
                                                 };
-                                                let _ = write.send(Message::Text(
-                                                    serde_json::to_string(&response).unwrap()
-                                                )).await;
+                                                if let Ok(json) = serde_json::to_string(&response) {
+                                                    let _ = write.send(Message::Text(json)).await;
+                                                }
                                             } else {
                                                 *count += 1;
                                                 let peer_count = *count;
@@ -219,9 +219,9 @@ async fn handle_connection(
                                                     code,
                                                     peer_count,
                                                 };
-                                                let _ = write.send(Message::Text(
-                                                    serde_json::to_string(&response).unwrap()
-                                                )).await;
+                                                if let Ok(json) = serde_json::to_string(&response) {
+                                                    let _ = write.send(Message::Text(json)).await;
+                                                }
 
                                                 info!("Client {} joined room, {} peers", addr, peer_count);
                                             }
@@ -229,9 +229,9 @@ async fn handle_connection(
                                             let response = RelayMessage::Error {
                                                 message: "Room not found".to_string(),
                                             };
-                                            let _ = write.send(Message::Text(
-                                                serde_json::to_string(&response).unwrap()
-                                            )).await;
+                                            if let Ok(json) = serde_json::to_string(&response) {
+                                                let _ = write.send(Message::Text(json)).await;
+                                            }
                                         }
                                     }
 
@@ -243,17 +243,17 @@ async fn handle_connection(
                                             let response = RelayMessage::Error {
                                                 message: "Not in a room".to_string(),
                                             };
-                                            let _ = write.send(Message::Text(
-                                                serde_json::to_string(&response).unwrap()
-                                            )).await;
+                                            if let Ok(json) = serde_json::to_string(&response) {
+                                                let _ = write.send(Message::Text(json)).await;
+                                            }
                                         }
                                     }
 
                                     RelayMessage::Ping => {
                                         let response = RelayMessage::Pong;
-                                        let _ = write.send(Message::Text(
-                                            serde_json::to_string(&response).unwrap()
-                                        )).await;
+                                        if let Ok(json) = serde_json::to_string(&response) {
+                                            let _ = write.send(Message::Text(json)).await;
+                                        }
                                     }
 
                                     _ => {}
@@ -297,15 +297,15 @@ async fn handle_connection(
                         if data.is_empty() {
                             // Peer joined notification
                             let response = RelayMessage::PeerJoined;
-                            let _ = write.send(Message::Text(
-                                serde_json::to_string(&response).unwrap()
-                            )).await;
+                            if let Ok(json) = serde_json::to_string(&response) {
+                                let _ = write.send(Message::Text(json)).await;
+                            }
                         } else {
                             // Forward message from peer
                             let response = RelayMessage::Message { data };
-                            let _ = write.send(Message::Text(
-                                serde_json::to_string(&response).unwrap()
-                            )).await;
+                            if let Ok(json) = serde_json::to_string(&response) {
+                                let _ = write.send(Message::Text(json)).await;
+                            }
                         }
                     }
                 }

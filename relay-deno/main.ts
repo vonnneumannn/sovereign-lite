@@ -1,6 +1,73 @@
 // Sovereign Relay Server for Deno Deploy
 // Channels with persistent message history using Deno KV
 
+// Security: HTML escape function to prevent XSS
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Security: Rate limiting configuration
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const MAX_MESSAGES_PER_WINDOW = 100;
+const MAX_CONNECTIONS_PER_IP = 10;
+const MAX_MESSAGE_SIZE = 65536; // 64KB max message size
+
+// Rate limiting state
+const messageRateLimits = new Map<string, { count: number; resetTime: number }>();
+const connectionCounts = new Map<string, number>();
+
+// Allowed origins for CORS (configure as needed)
+const ALLOWED_ORIGINS = [
+  'https://vonnneumannn.github.io',
+  'http://localhost:8000',
+  'http://localhost:3000',
+  'http://127.0.0.1:8000',
+  'http://127.0.0.1:3000',
+];
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+}
+
+function checkRateLimit(identifier: string): boolean {
+  const now = Date.now();
+  const limit = messageRateLimits.get(identifier);
+
+  if (!limit || now > limit.resetTime) {
+    messageRateLimits.set(identifier, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+
+  if (limit.count >= MAX_MESSAGES_PER_WINDOW) {
+    return false;
+  }
+
+  limit.count++;
+  return true;
+}
+
+function incrementConnectionCount(ip: string): boolean {
+  const count = connectionCounts.get(ip) || 0;
+  if (count >= MAX_CONNECTIONS_PER_IP) {
+    return false;
+  }
+  connectionCounts.set(ip, count + 1);
+  return true;
+}
+
+function decrementConnectionCount(ip: string): void {
+  const count = connectionCounts.get(ip) || 0;
+  if (count > 0) {
+    connectionCounts.set(ip, count - 1);
+  }
+}
+
 interface Message {
   id: string;
   alias: string;
@@ -113,13 +180,32 @@ async function getChannelLeaderboard() {
   });
 }
 
-function handleWebSocket(ws: WebSocket) {
+function handleWebSocket(ws: WebSocket, clientIp: string = 'unknown') {
   let currentChannel: string | null = null;
   let myAlias: string = generateAlias();
 
   ws.onmessage = async (event) => {
     try {
-      const msg = JSON.parse(event.data);
+      // Security: Check message size limit
+      const messageData = typeof event.data === 'string' ? event.data : '';
+      if (messageData.length > MAX_MESSAGE_SIZE) {
+        ws.send(JSON.stringify({
+          type: 'Error',
+          data: { message: 'Message too large' }
+        }));
+        return;
+      }
+
+      // Security: Check rate limit
+      if (!checkRateLimit(clientIp)) {
+        ws.send(JSON.stringify({
+          type: 'Error',
+          data: { message: 'Rate limit exceeded. Please slow down.' }
+        }));
+        return;
+      }
+
+      const msg = JSON.parse(messageData);
 
       switch (msg.type) {
         case 'CreateChannel':
@@ -326,12 +412,16 @@ function handleWebSocket(ws: WebSocket) {
           break;
         }
       }
-    } catch (e) {
-      console.error('Error handling message:', e);
+    } catch (_e) {
+      // Security: Avoid logging potentially sensitive error details or user data
+      console.error(`Error handling message from ${clientIp}`);
     }
   };
 
   ws.onclose = async () => {
+    // Security: Decrement connection count for this IP
+    decrementConnectionCount(clientIp);
+
     if (currentChannel) {
       const peers = getPeers(currentChannel);
       peers.delete(ws);
@@ -356,8 +446,9 @@ function handleWebSocket(ws: WebSocket) {
     }
   };
 
-  ws.onerror = (e) => {
-    console.error('WebSocket error:', e);
+  ws.onerror = (_e) => {
+    // Security: Avoid logging potentially sensitive error details
+    console.error(`WebSocket error for client ${clientIp}`);
   };
 }
 
@@ -369,17 +460,23 @@ async function generateStatsHTML(url: URL): Promise<string> {
 
   const leaderboard = (await getChannelLeaderboard()).slice(0, 25);
 
-  const channelRows = leaderboard.map((channel, i) => `
+  const channelRows = leaderboard.map((channel, i) => {
+    // Security: Escape all user-generated content to prevent XSS
+    const safeCode = escapeHtml(channel.code);
+    const safeAliases = channel.activeAliases.map(escapeHtml);
+    const safeAliasesTitle = safeAliases.join(', ');
+    const safeAliasesDisplay = safeAliases.slice(0, 3).join(', ') + (safeAliases.length > 3 ? '...' : '');
+    return `
     <tr style="background: ${channel.isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent'}">
       <td>${i + 1}</td>
-      <td><code style="color: ${channel.isActive ? '#22c55e' : '#818cf8'}">${channel.code}</code></td>
+      <td><code style="color: ${channel.isActive ? '#22c55e' : '#818cf8'}">${safeCode}</code></td>
       <td>${channel.currentPeers} ${channel.isActive ? '🟢' : '⚫'}</td>
-      <td title="${channel.activeAliases.join(', ')}">${channel.activeAliases.slice(0, 3).join(', ')}${channel.activeAliases.length > 3 ? '...' : ''}</td>
+      <td title="${safeAliasesTitle}">${safeAliasesDisplay}</td>
       <td>${channel.messageCount}</td>
       <td>${channel.totalPeersEver}</td>
       <td>${new Date(channel.lastActivity).toLocaleString()}</td>
     </tr>
-  `).join('');
+  `}).join('');
 
   return `
     <!DOCTYPE html>
@@ -482,20 +579,61 @@ Deno.serve({ port: 8000 }, async (req) => {
   }
 
   if (url.pathname === '/api/stats') {
+    const origin = req.headers.get('origin');
     const allChannels = await getAllChannels();
     const activeCount = allChannels.filter(c => getPeers(c.code).size > 0).length;
+
+    // Security: Restrict CORS to allowed origins only
+    const corsHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (origin && isOriginAllowed(origin)) {
+      corsHeaders['Access-Control-Allow-Origin'] = origin;
+    }
+
     return new Response(JSON.stringify({
       totalChannels: allChannels.length,
       activeChannels: activeCount,
       leaderboard: await getChannelLeaderboard()
     }), {
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: corsHeaders,
     });
   }
 
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.get('origin');
+    const corsHeaders: Record<string, string> = {
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    };
+    if (origin && isOriginAllowed(origin)) {
+      corsHeaders['Access-Control-Allow-Origin'] = origin;
+    }
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   if (req.headers.get('upgrade') === 'websocket') {
+    // Security: Validate WebSocket origin
+    const origin = req.headers.get('origin');
+    if (origin && !isOriginAllowed(origin)) {
+      console.warn(`WebSocket connection rejected from unauthorized origin: ${origin}`);
+      return new Response('Forbidden: Origin not allowed', { status: 403 });
+    }
+
+    // Security: Rate limit connections per IP
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     req.headers.get('cf-connecting-ip') ||
+                     'unknown';
+
+    if (!incrementConnectionCount(clientIp)) {
+      console.warn(`Connection rate limit exceeded for IP: ${clientIp}`);
+      return new Response('Too Many Connections', { status: 429 });
+    }
+
     const { socket, response } = Deno.upgradeWebSocket(req);
-    handleWebSocket(socket);
+    handleWebSocket(socket, clientIp);
     return response;
   }
 

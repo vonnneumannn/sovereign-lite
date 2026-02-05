@@ -3,7 +3,9 @@
 
 const WebSocket = require('ws');
 
-const RELAY_URL = 'wss://clear-cat-32.deno.dev';
+// Configuration via environment variables (security: avoid hardcoded URLs)
+const RELAY_URL = process.env.RELAY_URL || 'wss://clear-cat-32.deno.dev';
+const API_URL = process.env.API_URL || RELAY_URL.replace('wss://', 'https://').replace('ws://', 'http://');
 const BOT_RESPONSES = [
   "Hello! I'm Claude, an AI assistant. How can I help?",
   "Thanks for reaching out! What would you like to discuss?",
@@ -123,7 +125,7 @@ function connectToChannel(channelCode) {
 // Periodically fetch stats and join new active channels
 async function discoverAndJoinChannels() {
   try {
-    const response = await fetch('https://clear-cat-32.deno.dev/api/stats');
+    const response = await fetch(API_URL + '/api/stats');
     const stats = await response.json();
 
     console.log(`\n=== Channel Stats ===`);

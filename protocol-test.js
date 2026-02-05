@@ -2,7 +2,10 @@
 // Tests: CreateChannel, JoinChannel, Broadcast, History, Stats, PeerJoined, PeerLeft
 
 const WebSocket = require('ws');
-const RELAY_URL = 'wss://clear-cat-32.deno.dev';
+
+// Configuration via environment variables (security: avoid hardcoded URLs)
+const RELAY_URL = process.env.RELAY_URL || 'wss://clear-cat-32.deno.dev';
+const API_URL = process.env.API_URL || RELAY_URL.replace('wss://', 'https://').replace('ws://', 'http://');
 
 let testsPassed = 0;
 let testsFailed = 0;
@@ -139,7 +142,7 @@ async function runTests() {
 
   // Test 6: Get Stats
   console.log('6. Stats API Test');
-  const statsResponse = await fetch('https://clear-cat-32.deno.dev/api/stats');
+  const statsResponse = await fetch(API_URL + '/api/stats');
   const stats = await statsResponse.json();
 
   test('Stats endpoint returns JSON', stats && typeof stats.totalChannels === 'number');
@@ -171,7 +174,7 @@ async function runTests() {
   await sleep(1500);
 
   // Check stats - channel should still exist
-  const statsAfter = await fetch('https://clear-cat-32.deno.dev/api/stats');
+  const statsAfter = await fetch(API_URL + '/api/stats');
   const statsDataAfter = await statsAfter.json();
   const channelStillExists = statsDataAfter.leaderboard.some(c => c.code === channelCode);
   test('Channel persists after all peers leave', channelStillExists);
