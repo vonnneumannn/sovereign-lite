@@ -76,12 +76,15 @@
         .info-box { background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.875rem; color: var(--accent-light); }
 
         /* Chat styles */
+        .chat-container { display: flex; flex: 1; overflow: hidden; }
+        .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
         .chat-header {
             padding: 12px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
             display: flex; justify-content: space-between; align-items: center;
         }
         .chat-header code { font-family: monospace; font-size: 0.875rem; color: var(--accent-light); }
         .chat-info { font-size: 0.75rem; color: var(--text-muted); }
+        .chat-header-buttons { display: flex; gap: 8px; align-items: center; }
         .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
         .system-msg { text-align: center; font-size: 0.75rem; color: var(--text-muted); padding: 8px; }
         .message { max-width: 85%; padding: 10px 14px; border-radius: 12px; }
@@ -100,7 +103,104 @@
         .toast.error { border-left: 3px solid var(--error); }
 
         .peers-list { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
-        .github-link { position: fixed; top: 16px; right: 16px; color: var(--text-secondary); }
+        .github-link { position: fixed; top: 16px; right: 16px; color: var(--text-secondary); z-index: 100; }
+
+        /* Leaderboard toggle button */
+        .leaderboard-toggle {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--accent-light);
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .leaderboard-toggle:hover { background: var(--border); }
+        .leaderboard-toggle.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+        /* Sidebar styles */
+        .sidebar {
+            width: 0;
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            transition: width 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar.open { width: 320px; }
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sidebar-header h3 { font-size: 0.9rem; color: var(--accent-light); }
+        .sidebar-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.25rem;
+            padding: 4px;
+        }
+        .sidebar-close:hover { color: var(--text-primary); }
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .sidebar-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .sidebar-stat {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .sidebar-stat-value { font-size: 1.25rem; font-weight: bold; color: var(--accent-light); }
+        .sidebar-stat-label { font-size: 0.625rem; color: var(--text-muted); text-transform: uppercase; }
+        .channel-list { display: flex; flex-direction: column; gap: 8px; }
+        .channel-item {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .channel-item:hover { border-color: var(--accent); }
+        .channel-item.active { border-color: var(--success); background: rgba(34, 197, 94, 0.1); }
+        .channel-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .channel-item-code { font-family: monospace; font-weight: 600; color: var(--accent-light); }
+        .channel-item-peers { font-size: 0.7rem; color: var(--success); }
+        .channel-item-stats { font-size: 0.7rem; color: var(--text-muted); }
+        .channel-item-preview { font-size: 0.75rem; color: var(--text-secondary); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sidebar-loading { text-align: center; padding: 20px; color: var(--text-muted); }
+        .sidebar-refresh {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.7rem;
+        }
+        .sidebar-refresh:hover { background: var(--border); }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; top: 0; right: 0; height: 100vh; z-index: 1000; width: 0; }
+            .sidebar.open { width: 100%; max-width: 320px; }
+        }
     </style>
 </head>
 <body>
@@ -126,8 +226,6 @@
             <p class="subtitle">Persistent channels with message history</p>
             <div class="info-box">
                 📡 Messages are stored on the relay. Join any channel to see its full history.
-                <br><br>
-                <a href="https://clear-cat-32.deno.dev" target="_blank" style="color: var(--accent-light);">View Channel Leaderboard →</a>
             </div>
             <div style="width: 100%;">
                 <button class="btn btn-primary" id="startBtn">Connect to Relay</button>
@@ -148,24 +246,71 @@
                 <input type="text" id="joinCodeInput" class="room-code-input" placeholder="CLAUDE" maxlength="6">
                 <button class="btn btn-secondary" id="joinChannelBtn" style="width: auto;">Join</button>
             </div>
-            <p style="font-size: 0.75rem; color: var(--text-muted); text-align: center;">
+            <p style="font-size: 0.75rem; color: var(--text-muted); text-align: center; margin-bottom: 24px;">
                 Try joining channel <strong>CLAUDE</strong> to chat with Claude AI!
             </p>
+
+            <!-- Leaderboard preview on dashboard -->
+            <div style="background: var(--bg-secondary); padding: 16px; border-radius: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h4 style="font-size: 0.875rem; color: var(--text-secondary);">Active Channels</h4>
+                    <button class="sidebar-refresh" id="dashboardRefreshBtn">Refresh</button>
+                </div>
+                <div id="dashboardChannelList" class="channel-list">
+                    <div class="sidebar-loading">Loading channels...</div>
+                </div>
+            </div>
         </div>
 
         <!-- Chat Screen -->
         <div id="chatScreen" class="screen" style="padding: 0;">
-            <div class="chat-header">
-                <div>
-                    <code id="channelCode">------</code>
-                    <div class="chat-info"><span id="peerCount">0</span> online</div>
+            <div class="chat-container">
+                <div class="chat-main">
+                    <div class="chat-header">
+                        <div>
+                            <code id="channelCode">------</code>
+                            <div class="chat-info"><span id="peerCount">0</span> online</div>
+                        </div>
+                        <div class="chat-header-buttons">
+                            <button class="leaderboard-toggle" id="leaderboardToggle">
+                                <span>📊</span> Channels
+                            </button>
+                            <button class="btn-secondary" id="endChatBtn" style="padding: 8px 16px; width: auto; margin: 0;">Leave</button>
+                        </div>
+                    </div>
+                    <div class="messages" id="messagesContainer"></div>
+                    <div class="chat-input">
+                        <input type="text" id="messageInput" placeholder="Type a message... (use @CLAUDE to talk to Claude)">
+                        <button class="btn btn-primary" id="sendBtn">Send</button>
+                    </div>
                 </div>
-                <button class="btn-secondary" id="endChatBtn" style="padding: 8px 16px; width: auto; margin: 0;">Leave</button>
-            </div>
-            <div class="messages" id="messagesContainer"></div>
-            <div class="chat-input">
-                <input type="text" id="messageInput" placeholder="Type a message... (use @CLAUDE to talk to Claude)">
-                <button class="btn btn-primary" id="sendBtn">Send</button>
+
+                <!-- Leaderboard Sidebar -->
+                <div class="sidebar" id="leaderboardSidebar">
+                    <div class="sidebar-header">
+                        <h3>📊 Channel Leaderboard</h3>
+                        <button class="sidebar-close" id="sidebarClose">&times;</button>
+                    </div>
+                    <div class="sidebar-content">
+                        <div class="sidebar-stats" id="sidebarStats">
+                            <div class="sidebar-stat">
+                                <div class="sidebar-stat-value" id="statTotalChannels">-</div>
+                                <div class="sidebar-stat-label">Total Channels</div>
+                            </div>
+                            <div class="sidebar-stat">
+                                <div class="sidebar-stat-value" id="statActiveChannels">-</div>
+                                <div class="sidebar-stat-label">Active</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Click to join</span>
+                            <button class="sidebar-refresh" id="sidebarRefreshBtn">Refresh</button>
+                        </div>
+                        <div class="channel-list" id="sidebarChannelList">
+                            <div class="sidebar-loading">Loading...</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -175,6 +320,7 @@
         let channelCode = null;
         let myAlias = null;
         let peerCount = 0;
+        let sidebarOpen = false;
 
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -233,6 +379,7 @@
             ws.onopen = () => {
                 updateStatus('Connected', 'connected');
                 showScreen('dashboardScreen');
+                loadLeaderboard();
             };
 
             ws.onmessage = (event) => {
@@ -276,6 +423,7 @@
 
                     showScreen('chatScreen');
                     showToast('Channel created: ' + channelCode, 'success');
+                    loadLeaderboard();
                     break;
 
                 case 'ChannelJoined':
@@ -299,6 +447,7 @@
 
                     showScreen('chatScreen');
                     showToast('Joined ' + channelCode + ' as ' + myAlias, 'success');
+                    loadLeaderboard();
                     break;
 
                 case 'RoomCreated':
@@ -353,8 +502,9 @@
             ws.send(JSON.stringify({ type: 'CreateChannel' }));
         }
 
-        function joinChannel() {
-            const code = document.getElementById('joinCodeInput').value.toUpperCase().trim();
+        function joinChannel(code) {
+            code = code || document.getElementById('joinCodeInput').value;
+            code = code.toUpperCase().trim();
             if (!code) {
                 showToast('Enter a channel code', 'error');
                 return;
@@ -378,17 +528,97 @@
         function leaveChannel() {
             channelCode = null;
             document.getElementById('messagesContainer').innerHTML = '';
+            closeSidebar();
             showScreen('dashboardScreen');
+            loadLeaderboard();
+        }
+
+        // Sidebar functions
+        function toggleSidebar() {
+            const sidebar = document.getElementById('leaderboardSidebar');
+            const toggle = document.getElementById('leaderboardToggle');
+            sidebarOpen = !sidebarOpen;
+            sidebar.classList.toggle('open', sidebarOpen);
+            toggle.classList.toggle('active', sidebarOpen);
+            if (sidebarOpen) {
+                loadLeaderboard();
+            }
+        }
+
+        function closeSidebar() {
+            const sidebar = document.getElementById('leaderboardSidebar');
+            const toggle = document.getElementById('leaderboardToggle');
+            sidebarOpen = false;
+            sidebar.classList.remove('open');
+            toggle.classList.remove('active');
+        }
+
+        async function loadLeaderboard() {
+            try {
+                const response = await fetch('https://clear-cat-32.deno.dev/api/stats');
+                const data = await response.json();
+
+                // Update sidebar stats
+                document.getElementById('statTotalChannels').textContent = data.totalChannels || 0;
+                document.getElementById('statActiveChannels').textContent = data.activeChannels || 0;
+
+                // Render channel lists
+                const leaderboard = data.leaderboard || [];
+                renderChannelList('sidebarChannelList', leaderboard);
+                renderChannelList('dashboardChannelList', leaderboard.slice(0, 5));
+
+            } catch (e) {
+                console.error('Failed to load leaderboard:', e);
+                document.getElementById('sidebarChannelList').innerHTML = '<div class="sidebar-loading">Failed to load</div>';
+                document.getElementById('dashboardChannelList').innerHTML = '<div class="sidebar-loading">Failed to load</div>';
+            }
+        }
+
+        function renderChannelList(containerId, channels) {
+            const container = document.getElementById(containerId);
+
+            if (!channels || channels.length === 0) {
+                container.innerHTML = '<div class="sidebar-loading">No channels yet</div>';
+                return;
+            }
+
+            container.innerHTML = channels.map(ch => {
+                const isActive = ch.currentPeers > 0;
+                const isCurrent = ch.code === channelCode;
+                const lastMsg = ch.recentMessages && ch.recentMessages.length > 0
+                    ? ch.recentMessages[ch.recentMessages.length - 1]
+                    : null;
+                const preview = lastMsg
+                    ? `${lastMsg.alias}: ${lastMsg.preview}`
+                    : 'No messages yet';
+
+                return `
+                    <div class="channel-item ${isCurrent ? 'active' : ''}" onclick="joinChannel('${ch.code}')">
+                        <div class="channel-item-header">
+                            <span class="channel-item-code">${ch.code}</span>
+                            <span class="channel-item-peers">${isActive ? '🟢 ' + ch.currentPeers + ' online' : '⚫ offline'}</span>
+                        </div>
+                        <div class="channel-item-stats">
+                            ${ch.messageCount} messages · ${ch.totalPeersEver} total visitors
+                        </div>
+                        <div class="channel-item-preview">${preview}</div>
+                    </div>
+                `;
+            }).join('');
         }
 
         // Event listeners
         document.getElementById('startBtn').onclick = connectToRelay;
         document.getElementById('createChannelBtn').onclick = createChannel;
-        document.getElementById('joinChannelBtn').onclick = joinChannel;
+        document.getElementById('joinChannelBtn').onclick = () => joinChannel();
         document.getElementById('joinCodeInput').onkeypress = (e) => { if (e.key === 'Enter') joinChannel(); };
         document.getElementById('sendBtn').onclick = sendMessage;
         document.getElementById('messageInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
         document.getElementById('endChatBtn').onclick = leaveChannel;
+        document.getElementById('leaderboardToggle').onclick = toggleSidebar;
+        document.getElementById('sidebarClose').onclick = closeSidebar;
+        document.getElementById('sidebarRefreshBtn').onclick = loadLeaderboard;
+        document.getElementById('dashboardRefreshBtn').onclick = loadLeaderboard;
     </script>
 </body>
 </html>
