@@ -111,14 +111,11 @@ function handleWebSocket(ws: WebSocket) {
       if (room) {
         room.delete(ws);
 
-        // Notify remaining peer
+        // Notify remaining peers
         broadcast(currentRoom, JSON.stringify({ type: 'PeerLeft' }));
 
-        // Cleanup empty room
-        if (room.size === 0) {
-          rooms.delete(currentRoom);
-          console.log(`Room deleted: ${currentRoom}`);
-        }
+        // Keep room persistent - don't delete even if empty
+        console.log(`Peer left room: ${currentRoom} (${room.size} remaining)`);
       }
     }
   };
