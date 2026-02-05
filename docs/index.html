@@ -674,14 +674,32 @@
         // Audio functions
         async function initAudio() {
             try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
-                });
+                // Request microphone with mobile-friendly constraints
+                const constraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                // Create audio context (needs user interaction on iOS)
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                // iOS requires resume after user gesture
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
                 $('pttBtn').disabled = false;
+                toast('Radio ready');
             } catch (e) {
                 console.error('Mic access failed:', e);
-                toast('Microphone required for radio', true);
+                $('pttBtn').disabled = true;
+                $('pttBtn').textContent = 'MIC BLOCKED';
+                toast('Allow microphone access to use radio', true);
             }
         }
 
@@ -691,53 +709,91 @@
             currentTranscript = '';
 
             $('pttBtn').classList.add('active');
+            $('pttBtn').textContent = '◉ TRANSMITTING';
             $('txLed').classList.add('active');
 
             ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'TX_START:' + myAlias }}));
 
-            // Speech recognition
+            // Speech recognition - try to start, fail gracefully
             const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SR) {
                 try {
                     speechRecognition = new SR();
                     speechRecognition.continuous = true;
                     speechRecognition.interimResults = true;
+                    speechRecognition.lang = 'en-US';
                     speechRecognition.onresult = e => {
                         for (let i = e.resultIndex; i < e.results.length; i++) {
-                            if (e.results[i].isFinal) currentTranscript += e.results[i][0].transcript + ' ';
+                            if (e.results[i].isFinal) {
+                                currentTranscript += e.results[i][0].transcript + ' ';
+                            }
                         }
                     };
+                    speechRecognition.onerror = e => {
+                        console.log('Speech recognition error:', e.error);
+                    };
                     speechRecognition.start();
-                } catch (e) {}
+                } catch (e) {
+                    console.log('Speech recognition not available:', e);
+                }
             }
 
-            // Audio recording
-            mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 16000 });
-            mediaRecorder.ondataavailable = async e => {
-                if (e.data.size > 0 && isTransmitting) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const b64 = reader.result.split(',')[1];
-                        ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'AUDIO:' + b64 }}));
-                    };
-                    reader.readAsDataURL(e.data);
+            // Audio recording - try different codecs for compatibility
+            let mimeType = 'audio/webm;codecs=opus';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'audio/webm';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'audio/mp4';
+                    if (!MediaRecorder.isTypeSupported(mimeType)) {
+                        mimeType = ''; // Let browser choose
+                    }
                 }
-            };
-            mediaRecorder.start(200);
+            }
+
+            try {
+                const options = mimeType ? { mimeType, audioBitsPerSecond: 16000 } : { audioBitsPerSecond: 16000 };
+                mediaRecorder = new MediaRecorder(mediaStream, options);
+                mediaRecorder.ondataavailable = async e => {
+                    if (e.data.size > 0 && isTransmitting && ws.readyState === WebSocket.OPEN) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const b64 = reader.result.split(',')[1];
+                            if (b64) {
+                                ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'AUDIO:' + b64 }}));
+                            }
+                        };
+                        reader.readAsDataURL(e.data);
+                    }
+                };
+                mediaRecorder.onerror = e => {
+                    console.error('MediaRecorder error:', e);
+                    toast('Recording error', true);
+                };
+                mediaRecorder.start(200);
+            } catch (e) {
+                console.error('MediaRecorder failed:', e);
+                toast('Cannot record audio', true);
+                stopTransmit();
+                return;
+            }
 
             // VU meter
-            const analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(mediaStream);
-            source.connect(analyser);
-            analyser.fftSize = 256;
-            const data = new Uint8Array(analyser.frequencyBinCount);
-            (function updateVU() {
-                if (!isTransmitting) return;
-                analyser.getByteFrequencyData(data);
-                const avg = data.reduce((a, b) => a + b) / data.length;
-                $('vuBar').style.width = Math.min(100, avg * 1.5) + '%';
-                requestAnimationFrame(updateVU);
-            })();
+            try {
+                const analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                source.connect(analyser);
+                analyser.fftSize = 256;
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                (function updateVU() {
+                    if (!isTransmitting) return;
+                    analyser.getByteFrequencyData(data);
+                    const avg = data.reduce((a, b) => a + b) / data.length;
+                    $('vuBar').style.width = Math.min(100, avg * 1.5) + '%';
+                    requestAnimationFrame(updateVU);
+                })();
+            } catch (e) {
+                console.log('VU meter error:', e);
+            }
         }
 
         function stopTransmit() {
@@ -745,47 +801,87 @@
             isTransmitting = false;
 
             $('pttBtn').classList.remove('active');
+            $('pttBtn').textContent = 'PUSH TO TALK';
             $('txLed').classList.remove('active');
             $('vuBar').style.width = '0%';
 
-            if (mediaRecorder?.state !== 'inactive') mediaRecorder.stop();
-            if (speechRecognition) { speechRecognition.stop(); speechRecognition = null; }
-
-            ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'TX_END:' + myAlias }}));
-
-            // Send transcript
-            setTimeout(() => {
-                if (currentTranscript.trim()) {
-                    ws.send(JSON.stringify({ type: 'Broadcast', data: { content: '🎙️ ' + currentTranscript.trim() }}));
-                }
-                currentTranscript = '';
-            }, 500);
-        }
-
-        // Audio queue for smooth playback
-        let audioPlayQueue = [];
-        let isPlayingAudio = false;
-
-        async function playAudio(b64, alias) {
-            if (!audioContext) return;
-            if (audioContext.state === 'suspended') await audioContext.resume();
+            try {
+                if (mediaRecorder?.state !== 'inactive') mediaRecorder.stop();
+            } catch (e) {}
 
             try {
+                if (speechRecognition) {
+                    speechRecognition.stop();
+                    speechRecognition = null;
+                }
+            } catch (e) {}
+
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'TX_END:' + myAlias }}));
+            }
+
+            // Send transcript after a short delay to catch final results
+            setTimeout(() => {
+                const transcript = currentTranscript.trim();
+                if (transcript && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'Broadcast', data: { content: '🎙️ ' + transcript }}));
+                    toast('Transcribed: ' + transcript.substring(0, 30) + (transcript.length > 30 ? '...' : ''));
+                }
+                currentTranscript = '';
+            }, 800);
+        }
+
+        // Audio playback
+        async function playAudio(b64, alias) {
+            // Create audio context on demand if needed
+            if (!audioContext) {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.error('Cannot create AudioContext:', e);
+                    return;
+                }
+            }
+
+            try {
+                // Resume if suspended (iOS requirement)
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
                 const binary = atob(b64);
                 const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
 
-                const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
+                // Clone buffer to avoid detached ArrayBuffer issues
+                const arrayBuffer = bytes.buffer.slice(0);
+                const buffer = await audioContext.decodeAudioData(arrayBuffer);
+
                 const source = audioContext.createBufferSource();
                 source.buffer = buffer;
-                source.connect(audioContext.destination);
+
+                // Add gain for volume control
+                const gainNode = audioContext.createGain();
+                gainNode.gain.value = 1.0;
+
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
                 source.start(0);
 
-                // VU
+                // VU meter visualization
                 $('vuBar').style.width = (50 + Math.random() * 30) + '%';
-                setTimeout(() => { if (activeSpeakers.size > 0) $('vuBar').style.width = '0%'; }, 250);
+                setTimeout(() => {
+                    if (activeSpeakers.size > 0) {
+                        $('vuBar').style.width = '20%';
+                    } else {
+                        $('vuBar').style.width = '0%';
+                    }
+                }, 200);
+
             } catch (e) {
-                console.error('Audio decode error:', e);
+                console.error('Audio decode/play error:', e);
             }
         }
 
