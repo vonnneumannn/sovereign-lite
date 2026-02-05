@@ -232,12 +232,6 @@ function handleWebSocket(ws: WebSocket) {
                   peerWs.send(broadcastMsg);
                 }
               }
-
-              // Also send old format for compatibility (exclude sender)
-              broadcast(currentChannel, JSON.stringify({
-                type: 'Message',
-                data: { data: content }
-              }), ws);
             }
           }
           break;
