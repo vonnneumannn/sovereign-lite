@@ -140,8 +140,10 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        .channel-btn:hover { border-color: var(--accent); }
+        .channel-btn:hover, .channel-btn:active { border-color: var(--accent); }
         .channel-btn .arrow { color: var(--text-dim); }
 
         .join-row {
@@ -155,13 +157,15 @@
             color: var(--accent);
             padding: 16px;
             font-family: inherit;
-            font-size: 1rem;
+            font-size: 16px; /* Prevents iOS zoom on focus */
             text-transform: uppercase;
             letter-spacing: 0.2em;
             text-align: center;
+            -webkit-appearance: none;
+            border-radius: 0;
         }
         .code-input:focus { outline: none; border-color: var(--accent); }
-        .code-input::placeholder { color: var(--text-dim); }
+        .code-input::placeholder { color: var(--text-dim); text-transform: none; }
         .join-btn {
             background: var(--accent);
             border: none;
@@ -171,15 +175,19 @@
             font-size: 0.8rem;
             font-weight: bold;
             cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        .join-btn:hover { filter: brightness(1.2); }
+        .join-btn:hover, .join-btn:active { filter: brightness(1.2); }
 
         .channel-list {
             flex: 1;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             display: flex;
             flex-direction: column;
             gap: 8px;
+            overscroll-behavior: contain;
         }
         .channel-item {
             background: var(--surface);
@@ -189,8 +197,10 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        .channel-item:hover { border-color: var(--accent); }
+        .channel-item:hover, .channel-item:active { border-color: var(--accent); }
         .channel-item.active { border-color: var(--accent); background: rgba(0,255,0,0.05); }
         .channel-code { font-weight: bold; color: var(--accent); letter-spacing: 0.1em; }
         .channel-meta { font-size: 0.65rem; color: var(--text-dim); }
@@ -318,10 +328,12 @@
         .messages {
             flex: 1;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             padding: 16px;
             display: flex;
             flex-direction: column;
             gap: 8px;
+            overscroll-behavior: contain;
         }
         .msg {
             padding: 10px 12px;
@@ -372,7 +384,9 @@
             color: var(--text);
             padding: 12px 16px;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: 16px; /* Prevents iOS zoom */
+            -webkit-appearance: none;
+            border-radius: 0;
         }
         .msg-input:focus { outline: none; border-color: var(--accent); }
         .msg-input::placeholder { color: var(--text-dim); }
@@ -748,6 +762,10 @@
             }, 500);
         }
 
+        // Audio queue for smooth playback
+        let audioPlayQueue = [];
+        let isPlayingAudio = false;
+
         async function playAudio(b64, alias) {
             if (!audioContext) return;
             if (audioContext.state === 'suspended') await audioContext.resume();
@@ -826,7 +844,7 @@
                 const data = await res.json();
                 const list = $('channelList');
                 list.innerHTML = data.leaderboard?.map(ch => `
-                    <div class="channel-item ${ch.code === channelCode ? 'active' : ''}" onclick="joinChannel('${ch.code}')">
+                    <div class="channel-item ${ch.code === channelCode ? 'active' : ''}" data-code="${ch.code}">
                         <div>
                             <div class="channel-code">${ch.code}</div>
                             <div class="channel-meta">${ch.messageCount} msgs · ${ch.totalPeersEver} visitors</div>
@@ -839,36 +857,67 @@
             }
         }
 
-        // Event listeners
-        $('connectBtn').onclick = connect;
-        $('createBtn').onclick = createChannel;
-        $('joinBtn').onclick = () => joinChannel();
-        $('codeInput').onkeypress = e => { if (e.key === 'Enter') joinChannel(); };
-        $('leaveBtn').onclick = leaveChannel;
-        $('sendBtn').onclick = sendMessage;
-        $('msgInput').onkeypress = e => { if (e.key === 'Enter') sendMessage(); };
+        // Helper for mobile-friendly click/tap
+        function onTap(el, handler) {
+            let touchMoved = false;
+            el.addEventListener('touchstart', () => { touchMoved = false; }, { passive: true });
+            el.addEventListener('touchmove', () => { touchMoved = true; }, { passive: true });
+            el.addEventListener('touchend', e => {
+                if (!touchMoved) {
+                    e.preventDefault();
+                    handler(e);
+                }
+            });
+            el.addEventListener('click', handler);
+        }
 
-        // PTT
+        // Event listeners with mobile support
+        onTap($('connectBtn'), connect);
+        onTap($('createBtn'), createChannel);
+        onTap($('joinBtn'), () => joinChannel());
+        onTap($('leaveBtn'), leaveChannel);
+        onTap($('sendBtn'), sendMessage);
+
+        $('codeInput').addEventListener('keypress', e => { if (e.key === 'Enter') joinChannel(); });
+        $('msgInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+        // Channel list - event delegation for dynamic items
+        $('channelList').addEventListener('click', e => {
+            const item = e.target.closest('.channel-item');
+            if (item && item.dataset.code) {
+                joinChannel(item.dataset.code);
+            }
+        });
+        $('channelList').addEventListener('touchend', e => {
+            const item = e.target.closest('.channel-item');
+            if (item && item.dataset.code) {
+                e.preventDefault();
+                joinChannel(item.dataset.code);
+            }
+        });
+
+        // PTT - both mouse and touch
         const ptt = $('pttBtn');
-        ptt.onmousedown = startTransmit;
-        ptt.onmouseup = stopTransmit;
-        ptt.onmouseleave = stopTransmit;
-        ptt.ontouchstart = e => { e.preventDefault(); startTransmit(); };
-        ptt.ontouchend = e => { e.preventDefault(); stopTransmit(); };
+        ptt.addEventListener('mousedown', startTransmit);
+        ptt.addEventListener('mouseup', stopTransmit);
+        ptt.addEventListener('mouseleave', stopTransmit);
+        ptt.addEventListener('touchstart', e => { e.preventDefault(); startTransmit(); }, { passive: false });
+        ptt.addEventListener('touchend', e => { e.preventDefault(); stopTransmit(); }, { passive: false });
+        ptt.addEventListener('touchcancel', stopTransmit);
 
         // Spacebar PTT
-        document.onkeydown = e => {
+        document.addEventListener('keydown', e => {
             if (e.code === 'Space' && !isTransmitting && channelCode && document.activeElement.tagName !== 'INPUT') {
                 e.preventDefault();
                 startTransmit();
             }
-        };
-        document.onkeyup = e => {
+        });
+        document.addEventListener('keyup', e => {
             if (e.code === 'Space' && isTransmitting) {
                 e.preventDefault();
                 stopTransmit();
             }
-        };
+        });
     </script>
 </body>
 </html>
