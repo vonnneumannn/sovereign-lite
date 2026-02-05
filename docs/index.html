@@ -199,8 +199,11 @@
             align-items: center;
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
         }
-        .channel-item:hover, .channel-item:active { border-color: var(--accent); }
+        .channel-item:hover, .channel-item:active { border-color: var(--accent); background: rgba(0,255,0,0.05); }
+        .channel-item * { pointer-events: none; }
         .channel-item.active { border-color: var(--accent); background: rgba(0,255,0,0.05); }
         .channel-code { font-weight: bold; color: var(--accent); letter-spacing: 0.1em; }
         .channel-meta { font-size: 0.65rem; color: var(--text-dim); }
@@ -978,16 +981,30 @@
         $('msgInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
 
         // Channel list - event delegation for dynamic items
-        $('channelList').addEventListener('click', e => {
-            const item = e.target.closest('.channel-item');
-            if (item && item.dataset.code) {
-                joinChannel(item.dataset.code);
-            }
-        });
-        $('channelList').addEventListener('touchend', e => {
+        const channelList = $('channelList');
+        let channelTouchMoved = false;
+
+        channelList.addEventListener('touchstart', () => {
+            channelTouchMoved = false;
+        }, { passive: true });
+
+        channelList.addEventListener('touchmove', () => {
+            channelTouchMoved = true;
+        }, { passive: true });
+
+        channelList.addEventListener('touchend', e => {
+            if (channelTouchMoved) return;
             const item = e.target.closest('.channel-item');
             if (item && item.dataset.code) {
                 e.preventDefault();
+                e.stopPropagation();
+                joinChannel(item.dataset.code);
+            }
+        });
+
+        channelList.addEventListener('click', e => {
+            const item = e.target.closest('.channel-item');
+            if (item && item.dataset.code) {
                 joinChannel(item.dataset.code);
             }
         });
