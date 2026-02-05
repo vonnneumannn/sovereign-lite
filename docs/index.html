@@ -2,1145 +2,873 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sovereign - Secure Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SOVEREIGN</title>
     <style>
         :root {
-            --bg-primary: #0a0a0f;
-            --bg-secondary: #12121a;
-            --bg-tertiary: #1a1a25;
-            --accent: #6366f1;
-            --accent-hover: #4f46e5;
-            --accent-light: #818cf8;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --error: #ef4444;
-            --border: #2a2a3a;
-            --radius: 12px;
+            --bg: #000;
+            --surface: #111;
+            --border: #222;
+            --accent: #0f0;
+            --accent-dim: #060;
+            --text: #fff;
+            --text-dim: #666;
+            --danger: #f00;
+            --warning: #ff0;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
+            min-height: 100dvh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
-        .container { max-width: 600px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }
+
+        /* Header */
         header {
-            padding: 16px 20px;
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            border-bottom: 1px solid var(--accent-dim);
+            padding: 12px 16px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        header h1 {
-            font-size: 1.25rem;
-            background: linear-gradient(135deg, var(--accent-light), var(--accent));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .logo {
+            font-size: 1rem;
+            font-weight: bold;
+            letter-spacing: 0.3em;
+            color: var(--accent);
         }
-        .status { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--text-secondary); }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
-        .status-dot.connected { background: var(--success); }
-        .status-dot.connecting { background: var(--warning); animation: pulse 1s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .screen { display: none; flex: 1; flex-direction: column; padding: 24px 20px; }
-        .screen.active { display: flex; }
-        .centered { align-items: center; justify-content: center; text-align: center; }
-        .logo { font-size: 4rem; margin-bottom: 16px; }
-        h2 { font-size: 1.5rem; margin-bottom: 8px; }
-        .subtitle { color: var(--text-secondary); margin-bottom: 32px; }
-        .btn {
-            padding: 14px 24px; border: none; border-radius: 8px; font-size: 1rem;
-            font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; margin-bottom: 12px;
-        }
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); }
-        .btn-secondary:hover { background: var(--border); }
-        .input-group { display: flex; gap: 12px; margin-bottom: 16px; }
-        input { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; color: var(--text-primary); font-size: 1rem; }
-        input:focus { outline: none; border-color: var(--accent); }
-        .room-code-input { text-transform: uppercase; letter-spacing: 0.15em; text-align: center; font-weight: 600; font-size: 1.25rem; }
-        .divider { display: flex; align-items: center; margin: 24px 0; color: var(--text-muted); }
-        .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-        .divider span { padding: 0 16px; }
-        .info-box { background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.875rem; color: var(--accent-light); }
-
-        /* Chat styles */
-        .chat-container { display: flex; flex: 1; overflow: hidden; }
-        .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-        .chat-header {
-            padding: 12px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .chat-header code { font-family: monospace; font-size: 0.875rem; color: var(--accent-light); }
-        .chat-info { font-size: 0.75rem; color: var(--text-muted); }
-        .chat-header-buttons { display: flex; gap: 8px; align-items: center; }
-        .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-        .system-msg { text-align: center; font-size: 0.75rem; color: var(--text-muted); padding: 8px; }
-        .message { max-width: 85%; padding: 10px 14px; border-radius: 12px; }
-        .message.ours { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
-        .message.theirs { align-self: flex-start; background: var(--bg-tertiary); border-bottom-left-radius: 4px; }
-        .message .alias { font-size: 0.7rem; font-weight: 600; color: var(--accent-light); margin-bottom: 4px; }
-        .message.ours .alias { color: rgba(255,255,255,0.8); }
-        .message .content { word-wrap: break-word; }
-        .message .time { font-size: 0.625rem; opacity: 0.7; margin-top: 4px; }
-        .chat-input { padding: 12px 16px; background: var(--bg-secondary); border-top: 1px solid var(--border); display: flex; gap: 8px; }
-        .chat-input input { border-radius: 24px; }
-        .chat-input .btn { width: auto; margin: 0; border-radius: 24px; padding: 12px 24px; }
-
-        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--bg-tertiary); color: var(--text-primary); padding: 12px 24px; border-radius: 8px; z-index: 1000; }
-        .toast.success { border-left: 3px solid var(--success); }
-        .toast.error { border-left: 3px solid var(--error); }
-
-        .github-link { position: fixed; top: 16px; right: 16px; color: var(--text-secondary); z-index: 100; }
-
-        /* Radio styles */
-        .radio-panel {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            margin: 0 16px 12px 16px;
-            padding: 16px;
-            display: none;
-        }
-        .radio-panel.active { display: block; }
-
-        .radio-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-        .radio-title {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-primary);
+        .status {
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-        .radio-freq {
-            font-family: 'Courier New', monospace;
             font-size: 0.7rem;
-            color: var(--success);
-            background: rgba(34, 197, 94, 0.1);
-            padding: 4px 8px;
-            border-radius: 4px;
+            color: var(--text-dim);
         }
-
-        .radio-display {
-            background: #0a0a12;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-            border: 1px solid #333;
-        }
-
-        .radio-status {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .radio-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.75rem;
-        }
-        .radio-led {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #333;
-        }
-        .radio-led.receiving { background: var(--success); box-shadow: 0 0 10px var(--success); animation: blink 0.5s infinite; }
-        .radio-led.transmitting { background: var(--error); box-shadow: 0 0 10px var(--error); animation: blink 0.3s infinite; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-
-        .radio-vu {
+        .status-led {
+            width: 8px;
             height: 8px;
-            background: #1a1a25;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-bottom: 8px;
+            border-radius: 50%;
+            background: var(--text-dim);
         }
-        .radio-vu-bar {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, var(--success) 0%, var(--warning) 70%, var(--error) 100%);
-            transition: width 0.1s;
-        }
+        .status-led.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .status-led.connecting { background: var(--warning); animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.3; } }
 
-        .radio-speakers {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-        }
-        .radio-speaker {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            background: var(--bg-tertiary);
-            padding: 4px 8px;
-            border-radius: 12px;
-            margin: 2px;
-        }
-        .radio-speaker.active {
-            background: rgba(239, 68, 68, 0.2);
-            color: var(--error);
-        }
-
-        .radio-controls {
-            display: flex;
-            gap: 8px;
-        }
-        .radio-btn {
+        /* Main Container */
+        main {
             flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-        }
-        .radio-btn.tune {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-        .radio-btn.tune:hover { background: var(--border); }
-        .radio-btn.tune.tuned-in {
-            background: var(--success);
-            color: white;
-            border-color: var(--success);
-        }
-        .radio-btn.ptt {
-            background: var(--bg-tertiary);
-            color: var(--text-muted);
-            border: 2px solid var(--border);
-        }
-        .radio-btn.ptt:hover { border-color: var(--error); color: var(--text-primary); }
-        .radio-btn.ptt.active {
-            background: var(--error);
-            color: white;
-            border-color: var(--error);
-            animation: ptt-pulse 1s infinite;
-        }
-        @keyframes ptt-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-        }
-        .radio-btn.ptt:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* Leaderboard toggle */
-        .header-btn {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            color: var(--accent-light);
-            padding: 8px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.75rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.2s;
-        }
-        .header-btn:hover { background: var(--border); }
-        .header-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-
-        /* Sidebar styles */
-        .sidebar {
-            width: 0;
-            overflow: hidden;
-            background: var(--bg-secondary);
-            border-left: 1px solid var(--border);
-            transition: width 0.3s ease;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
-        .sidebar.open { width: 320px; }
-        .sidebar-header {
+
+        /* Screens */
+        .screen { display: none; flex: 1; flex-direction: column; }
+        .screen.active { display: flex; }
+
+        /* Setup Screen */
+        #setupScreen {
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+            text-align: center;
+        }
+        .setup-title {
+            font-size: 2rem;
+            letter-spacing: 0.5em;
+            color: var(--accent);
+            margin-bottom: 8px;
+        }
+        .setup-sub {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 48px;
+            letter-spacing: 0.2em;
+        }
+        .connect-btn {
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+            padding: 16px 48px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            letter-spacing: 0.2em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .connect-btn:hover {
+            background: var(--accent);
+            color: var(--bg);
+        }
+        .connect-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* Dashboard */
+        #dashboardScreen { padding: 24px; gap: 24px; }
+        .callsign-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
             padding: 16px;
-            border-bottom: 1px solid var(--border);
+            text-align: center;
+        }
+        .callsign-label { font-size: 0.6rem; color: var(--text-dim); letter-spacing: 0.2em; margin-bottom: 4px; }
+        .callsign-value { font-size: 1.5rem; color: var(--accent); letter-spacing: 0.1em; }
+
+        .channel-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .channel-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 16px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .sidebar-header h3 { font-size: 0.9rem; color: var(--accent-light); }
-        .sidebar-close {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            font-size: 1.25rem;
-            padding: 4px;
+        .channel-btn:hover { border-color: var(--accent); }
+        .channel-btn .arrow { color: var(--text-dim); }
+
+        .join-row {
+            display: flex;
+            gap: 8px;
         }
-        .sidebar-close:hover { color: var(--text-primary); }
-        .sidebar-content { flex: 1; overflow-y: auto; padding: 12px; }
-        .sidebar-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
-        .sidebar-stat { background: var(--bg-tertiary); padding: 12px; border-radius: 8px; text-align: center; }
-        .sidebar-stat-value { font-size: 1.25rem; font-weight: bold; color: var(--accent-light); }
-        .sidebar-stat-label { font-size: 0.625rem; color: var(--text-muted); text-transform: uppercase; }
-        .channel-list { display: flex; flex-direction: column; gap: 8px; }
-        .channel-item {
-            background: var(--bg-tertiary);
-            padding: 12px;
-            border-radius: 8px;
+        .code-input {
+            flex: 1;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            padding: 16px;
+            font-family: inherit;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            text-align: center;
+        }
+        .code-input:focus { outline: none; border-color: var(--accent); }
+        .code-input::placeholder { color: var(--text-dim); }
+        .join-btn {
+            background: var(--accent);
+            border: none;
+            color: var(--bg);
+            padding: 16px 24px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s;
-            border: 1px solid transparent;
+        }
+        .join-btn:hover { filter: brightness(1.2); }
+
+        .channel-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .channel-item {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .channel-item:hover { border-color: var(--accent); }
-        .channel-item.active { border-color: var(--success); background: rgba(34, 197, 94, 0.1); }
-        .channel-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-        .channel-item-code { font-family: monospace; font-weight: 600; color: var(--accent-light); }
-        .channel-item-peers { font-size: 0.7rem; color: var(--success); }
-        .channel-item-stats { font-size: 0.7rem; color: var(--text-muted); }
-        .channel-item-preview { font-size: 0.75rem; color: var(--text-secondary); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sidebar-loading { text-align: center; padding: 20px; color: var(--text-muted); }
-        .sidebar-refresh { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.7rem; }
-        .sidebar-refresh:hover { background: var(--border); }
+        .channel-item.active { border-color: var(--accent); background: rgba(0,255,0,0.05); }
+        .channel-code { font-weight: bold; color: var(--accent); letter-spacing: 0.1em; }
+        .channel-meta { font-size: 0.65rem; color: var(--text-dim); }
+        .channel-peers { color: var(--accent); }
+        .channel-peers.offline { color: var(--text-dim); }
 
-        @media (max-width: 768px) {
-            .sidebar { position: fixed; top: 0; right: 0; height: 100vh; z-index: 1000; width: 0; }
-            .sidebar.open { width: 100%; max-width: 320px; }
+        /* Chat Screen */
+        #chatScreen { overflow: hidden; }
+
+        .chat-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-channel {
+            font-size: 1.2rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+        }
+        .chat-peers { font-size: 0.7rem; color: var(--text-dim); }
+        .leave-btn {
+            background: transparent;
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+        .leave-btn:hover { background: var(--danger); color: var(--bg); }
+
+        /* Radio Panel - Always visible */
+        .radio-panel {
+            background: linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px;
+        }
+        .radio-display {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .radio-leds {
+            display: flex;
+            gap: 16px;
+        }
+        .led-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .led {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #222;
+        }
+        .led.rx.active { background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+        .led.tx.active { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
+        .led-label { font-size: 0.65rem; color: var(--text-dim); }
+
+        .radio-speaker {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-align: right;
+        }
+        .radio-speaker.active { color: var(--accent); }
+
+        .vu-meter {
+            height: 4px;
+            background: #111;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .vu-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--warning) 70%, var(--danger) 100%);
+            transition: width 0.05s;
+        }
+
+        .ptt-btn {
+            width: 100%;
+            padding: 20px;
+            background: #111;
+            border: 2px solid #333;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: bold;
+            letter-spacing: 0.2em;
+            cursor: pointer;
+            transition: all 0.1s;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        .ptt-btn:hover { border-color: var(--danger); color: var(--text); }
+        .ptt-btn.active {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: var(--bg);
+            animation: pulse-tx 0.5s infinite;
+        }
+        @keyframes pulse-tx {
+            50% { box-shadow: 0 0 20px var(--danger); }
+        }
+        .ptt-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .ptt-hint {
+            text-align: center;
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            margin-top: 8px;
+        }
+
+        /* Messages */
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .msg {
+            padding: 10px 12px;
+            border-radius: 4px;
+            max-width: 85%;
+            word-wrap: break-word;
+        }
+        .msg.system {
+            align-self: center;
+            background: transparent;
+            color: var(--text-dim);
+            font-size: 0.7rem;
+            text-align: center;
+        }
+        .msg.ours {
+            align-self: flex-end;
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+        }
+        .msg.theirs {
+            align-self: flex-start;
+            background: var(--surface);
+            border: 1px solid var(--border);
+        }
+        .msg-alias {
+            font-size: 0.6rem;
+            color: var(--accent);
+            margin-bottom: 4px;
+            letter-spacing: 0.1em;
+        }
+        .msg.ours .msg-alias { color: var(--text-dim); }
+        .msg-content { font-size: 0.85rem; line-height: 1.4; }
+        .msg-time { font-size: 0.55rem; color: var(--text-dim); margin-top: 4px; }
+        .msg-voice { color: var(--warning); }
+
+        /* Chat Input */
+        .chat-input {
+            padding: 12px 16px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+        .msg-input {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 16px;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .msg-input:focus { outline: none; border-color: var(--accent); }
+        .msg-input::placeholder { color: var(--text-dim); }
+        .send-btn {
+            background: var(--accent);
+            border: none;
+            color: var(--bg);
+            padding: 12px 20px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .send-btn:hover { filter: brightness(1.2); }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 12px 24px;
+            font-size: 0.75rem;
+            z-index: 1000;
+        }
+        .toast.error { border-color: var(--danger); color: var(--danger); }
+
+        /* Mobile optimizations */
+        @media (max-width: 480px) {
+            .setup-title { font-size: 1.5rem; }
+            .chat-channel { font-size: 1rem; }
         }
     </style>
 </head>
 <body>
-    <a href="https://github.com/vonnneumannn/sovereign-lite" class="github-link" target="_blank">
-        <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-        </svg>
-    </a>
+    <header>
+        <div class="logo">SOVEREIGN</div>
+        <div class="status">
+            <div class="status-led" id="statusLed"></div>
+            <span id="statusText">OFFLINE</span>
+        </div>
+    </header>
 
-    <div class="container">
-        <header>
-            <h1>Sovereign</h1>
-            <div class="status">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusText">Disconnected</span>
-            </div>
-        </header>
-
-        <!-- Setup Screen -->
-        <div id="setupScreen" class="screen active centered">
-            <div class="logo">📻</div>
-            <h2>Sovereign Radio</h2>
-            <p class="subtitle">Persistent channels with text & voice broadcast</p>
-            <div class="info-box">
-                📡 Messages persist forever. Voice broadcasts to all listeners.
-                <br><br>
-                📻 Tune in to hear. Push-to-talk to transmit.
-            </div>
-            <div style="width: 100%;">
-                <button class="btn btn-primary" id="startBtn">Connect to Relay</button>
-            </div>
+    <main>
+        <!-- Setup -->
+        <div id="setupScreen" class="screen active">
+            <div class="setup-title">SOVEREIGN</div>
+            <div class="setup-sub">SECURE RADIO NETWORK</div>
+            <button class="connect-btn" id="connectBtn">CONNECT</button>
         </div>
 
-        <!-- Dashboard Screen -->
+        <!-- Dashboard -->
         <div id="dashboardScreen" class="screen">
-            <div style="background: var(--bg-secondary); padding: 16px; border-radius: 12px; margin-bottom: 24px;">
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">YOUR CALLSIGN</div>
-                <code id="myAlias" style="color: var(--accent-light); font-size: 1.1rem;">Loading...</code>
+            <div class="callsign-box">
+                <div class="callsign-label">YOUR CALLSIGN</div>
+                <div class="callsign-value" id="myCallsign">---</div>
             </div>
 
-            <h3 style="margin-bottom: 16px;">Join or Create Channel</h3>
-            <button class="btn btn-primary" id="createChannelBtn">Create New Channel</button>
-            <div class="divider"><span>or join existing</span></div>
-            <div class="input-group">
-                <input type="text" id="joinCodeInput" class="room-code-input" placeholder="CLAUDE" maxlength="6">
-                <button class="btn btn-secondary" id="joinChannelBtn" style="width: auto;">Join</button>
+            <div class="channel-controls">
+                <button class="channel-btn" id="createBtn">
+                    <span>CREATE NEW CHANNEL</span>
+                    <span class="arrow">→</span>
+                </button>
+                <div class="join-row">
+                    <input type="text" class="code-input" id="codeInput" placeholder="ENTER CODE" maxlength="6">
+                    <button class="join-btn" id="joinBtn">JOIN</button>
+                </div>
             </div>
-            <p style="font-size: 0.75rem; color: var(--text-muted); text-align: center; margin-bottom: 24px;">
-                Try joining channel <strong>CLAUDE</strong> to chat with Claude AI!
-            </p>
 
-            <div style="background: var(--bg-secondary); padding: 16px; border-radius: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h4 style="font-size: 0.875rem; color: var(--text-secondary);">Active Channels</h4>
-                    <button class="sidebar-refresh" id="dashboardRefreshBtn">Refresh</button>
-                </div>
-                <div id="dashboardChannelList" class="channel-list">
-                    <div class="sidebar-loading">Loading channels...</div>
-                </div>
+            <div class="channel-list" id="channelList">
+                <!-- Channels populated here -->
             </div>
         </div>
 
-        <!-- Chat Screen -->
-        <div id="chatScreen" class="screen" style="padding: 0;">
-            <div class="chat-container">
-                <div class="chat-main">
-                    <div class="chat-header">
-                        <div>
-                            <code id="channelCode">------</code>
-                            <div class="chat-info"><span id="peerCount">0</span> online</div>
-                        </div>
-                        <div class="chat-header-buttons">
-                            <button class="header-btn" id="leaderboardToggle">
-                                <span>📊</span> Channels
-                            </button>
-                            <button class="btn-secondary" id="endChatBtn" style="padding: 8px 16px; width: auto; margin: 0;">Leave</button>
-                        </div>
-                    </div>
-
-                    <!-- Radio Panel -->
-                    <div class="radio-panel active" id="radioPanel">
-                        <div class="radio-header">
-                            <div class="radio-title">
-                                📻 Channel Radio
-                            </div>
-                            <div class="radio-freq" id="radioFreq">CH: ------</div>
-                        </div>
-
-                        <div class="radio-display">
-                            <div class="radio-status">
-                                <div class="radio-indicator">
-                                    <div class="radio-led" id="rxLed"></div>
-                                    <span>RX</span>
-                                </div>
-                                <div class="radio-indicator">
-                                    <span>TX</span>
-                                    <div class="radio-led" id="txLed"></div>
-                                </div>
-                            </div>
-                            <div class="radio-vu">
-                                <div class="radio-vu-bar" id="vuBar"></div>
-                            </div>
-                            <div class="radio-speakers" id="radioSpeakers">
-                                <span style="color: var(--text-muted);">No transmissions</span>
-                            </div>
-                        </div>
-
-                        <div class="radio-controls">
-                            <button class="radio-btn tune" id="tuneBtn">
-                                <span>📡</span> Tune In
-                            </button>
-                            <button class="radio-btn ptt" id="pttBtn" disabled>
-                                <span>🎙️</span> Push to Talk
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="messages" id="messagesContainer"></div>
-                    <div class="chat-input">
-                        <input type="text" id="messageInput" placeholder="Type a message... (use @CLAUDE to talk to Claude)">
-                        <button class="btn btn-primary" id="sendBtn">Send</button>
-                    </div>
+        <!-- Chat -->
+        <div id="chatScreen" class="screen">
+            <div class="chat-header">
+                <div>
+                    <div class="chat-channel" id="chatChannel">------</div>
+                    <div class="chat-peers"><span id="peerCount">0</span> ONLINE</div>
                 </div>
+                <button class="leave-btn" id="leaveBtn">LEAVE</button>
+            </div>
 
-                <!-- Sidebar -->
-                <div class="sidebar" id="leaderboardSidebar">
-                    <div class="sidebar-header">
-                        <h3>📊 Channel Leaderboard</h3>
-                        <button class="sidebar-close" id="sidebarClose">&times;</button>
-                    </div>
-                    <div class="sidebar-content">
-                        <div class="sidebar-stats">
-                            <div class="sidebar-stat">
-                                <div class="sidebar-stat-value" id="statTotalChannels">-</div>
-                                <div class="sidebar-stat-label">Total Channels</div>
-                            </div>
-                            <div class="sidebar-stat">
-                                <div class="sidebar-stat-value" id="statActiveChannels">-</div>
-                                <div class="sidebar-stat-label">Active</div>
-                            </div>
+            <div class="radio-panel">
+                <div class="radio-display">
+                    <div class="radio-leds">
+                        <div class="led-group">
+                            <div class="led rx" id="rxLed"></div>
+                            <span class="led-label">RX</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <span style="font-size: 0.75rem; color: var(--text-muted);">Click to join</span>
-                            <button class="sidebar-refresh" id="sidebarRefreshBtn">Refresh</button>
-                        </div>
-                        <div class="channel-list" id="sidebarChannelList">
-                            <div class="sidebar-loading">Loading...</div>
+                        <div class="led-group">
+                            <div class="led tx" id="txLed"></div>
+                            <span class="led-label">TX</span>
                         </div>
                     </div>
+                    <div class="radio-speaker" id="speakerDisplay">STANDBY</div>
                 </div>
+                <div class="vu-meter">
+                    <div class="vu-bar" id="vuBar"></div>
+                </div>
+                <button class="ptt-btn" id="pttBtn">PUSH TO TALK</button>
+                <div class="ptt-hint">HOLD BUTTON OR SPACEBAR TO TRANSMIT</div>
+            </div>
+
+            <div class="messages" id="messages"></div>
+
+            <div class="chat-input">
+                <input type="text" class="msg-input" id="msgInput" placeholder="Type message... (@CLAUDE to talk to AI)">
+                <button class="send-btn" id="sendBtn">SEND</button>
             </div>
         </div>
-    </div>
+    </main>
 
     <script>
+        // State
         let ws = null;
         let channelCode = null;
         let myAlias = null;
         let peerCount = 0;
-        let sidebarOpen = false;
 
-        // Radio state
-        let isTunedIn = false;
-        let isTransmitting = false;
+        // Audio state
         let audioContext = null;
         let mediaStream = null;
         let mediaRecorder = null;
-        let activeSpeakers = new Set(); // Multiple simultaneous speakers
-        let audioQueue = [];
-        let isPlaying = false;
-        let pendingAudioHistory = []; // Audio to play back on tune in
+        let isTransmitting = false;
+        let activeSpeakers = new Set();
         let speechRecognition = null;
         let currentTranscript = '';
 
+        // Elements
+        const $ = id => document.getElementById(id);
+
+        // Screen management
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.getElementById(id).classList.add('active');
+            $(id).classList.add('active');
         }
 
-        function updateStatus(text, type = 'disconnected') {
-            document.getElementById('statusText').textContent = text;
-            const dot = document.getElementById('statusDot');
-            dot.className = 'status-dot';
-            if (type === 'connected') dot.classList.add('connected');
-            else if (type === 'connecting') dot.classList.add('connecting');
+        function updateStatus(text, state) {
+            $('statusText').textContent = text;
+            $('statusLed').className = 'status-led';
+            if (state === 'on') $('statusLed').classList.add('on');
+            if (state === 'connecting') $('statusLed').classList.add('connecting');
         }
 
-        function showToast(message, type = 'info') {
-            const toast = document.createElement('div');
-            toast.className = 'toast ' + type;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+        function toast(msg, error = false) {
+            const t = document.createElement('div');
+            t.className = 'toast' + (error ? ' error' : '');
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
         }
 
-        function addMessage(alias, content, isOurs, timestamp) {
-            const container = document.getElementById('messagesContainer');
-            const msg = document.createElement('div');
-            msg.className = 'message ' + (isOurs ? 'ours' : 'theirs');
-            const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const time = timestamp ? new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            msg.innerHTML = '<div class="alias">' + alias + '</div><div class="content">' + escaped + '</div><div class="time">' + time + '</div>';
-            container.appendChild(msg);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function addSystemMessage(content) {
-            const container = document.getElementById('messagesContainer');
-            const msg = document.createElement('div');
-            msg.className = 'system-msg';
-            msg.textContent = content;
-            container.appendChild(msg);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function updatePeerCount(count) {
-            peerCount = count;
-            document.getElementById('peerCount').textContent = count;
-        }
-
-        function connectToRelay() {
-            updateStatus('Connecting...', 'connecting');
-            document.getElementById('startBtn').disabled = true;
+        // Connect to relay
+        function connect() {
+            updateStatus('CONNECTING', 'connecting');
+            $('connectBtn').disabled = true;
 
             ws = new WebSocket('wss://clear-cat-32.deno.dev');
 
             ws.onopen = () => {
-                updateStatus('Connected', 'connected');
+                updateStatus('ONLINE', 'on');
                 showScreen('dashboardScreen');
-                loadLeaderboard();
+                loadChannels();
             };
 
-            ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                handleMessage(msg);
-            };
+            ws.onmessage = e => handleMessage(JSON.parse(e.data));
 
             ws.onerror = () => {
-                updateStatus('Error', 'disconnected');
-                showToast('Connection failed', 'error');
-                document.getElementById('startBtn').disabled = false;
+                updateStatus('ERROR', '');
+                toast('Connection failed', true);
+                $('connectBtn').disabled = false;
             };
 
             ws.onclose = () => {
-                updateStatus('Disconnected');
-                stopRadio();
+                updateStatus('OFFLINE', '');
+                stopAudio();
             };
         }
 
+        // Message handler
         function handleMessage(msg) {
-            // Check for audio broadcast
-            if (msg.type === 'Broadcast' && msg.data && msg.data.content) {
-                try {
-                    if (msg.data.content.startsWith('AUDIO:')) {
-                        if (isTunedIn && msg.data.alias !== myAlias) {
-                            handleAudioBroadcast(msg.data);
-                        }
-                        return; // Don't show audio messages in chat
-                    }
-                    if (msg.data.content.startsWith('TX_START:') || msg.data.content.startsWith('TX_END:')) {
-                        handleTxStatus(msg.data);
-                        return;
-                    }
-                } catch (e) {}
+            // Filter audio/tx messages
+            if (msg.type === 'Broadcast' && msg.data?.content) {
+                const c = msg.data.content;
+                if (c.startsWith('AUDIO:')) {
+                    if (msg.data.alias !== myAlias) playAudio(c.substring(6), msg.data.alias);
+                    return;
+                }
+                if (c.startsWith('TX_START:')) {
+                    activeSpeakers.add(msg.data.alias);
+                    updateSpeakers();
+                    return;
+                }
+                if (c.startsWith('TX_END:')) {
+                    activeSpeakers.delete(msg.data.alias);
+                    updateSpeakers();
+                    return;
+                }
             }
 
             switch (msg.type) {
                 case 'ChannelCreated':
-                    channelCode = msg.data.code;
-                    myAlias = msg.data.alias;
-                    document.getElementById('myAlias').textContent = myAlias;
-                    document.getElementById('channelCode').textContent = channelCode;
-                    document.getElementById('radioFreq').textContent = 'CH: ' + channelCode;
-                    document.getElementById('messagesContainer').innerHTML = '';
-                    updatePeerCount(1);
-                    resetRadio();
-                    pendingAudioHistory = [];
-
-                    if (msg.data.history) {
-                        msg.data.history.forEach(m => {
-                            if (m.content && m.content.startsWith('AUDIO:') && m.isAudio) {
-                                // Store audio for playback when tuned in
-                                pendingAudioHistory.push(m);
-                                return;
-                            }
-                            if (m.content && m.content.startsWith('TX_')) return;
-                            if (m.alias === 'SYSTEM') {
-                                addSystemMessage(m.content);
-                            } else {
-                                addMessage(m.alias, m.content, m.alias === myAlias, m.timestamp);
-                            }
-                        });
-                    }
-
-                    showScreen('chatScreen');
-                    if (pendingAudioHistory.length > 0) {
-                        showToast('Channel created: ' + channelCode + ' (' + pendingAudioHistory.length + ' audio clips)', 'success');
-                    } else {
-                        showToast('Channel created: ' + channelCode, 'success');
-                    }
-                    loadLeaderboard();
-                    break;
-
                 case 'ChannelJoined':
                     channelCode = msg.data.code;
                     myAlias = msg.data.alias;
-                    document.getElementById('myAlias').textContent = myAlias;
-                    document.getElementById('channelCode').textContent = channelCode;
-                    document.getElementById('radioFreq').textContent = 'CH: ' + channelCode;
-                    document.getElementById('messagesContainer').innerHTML = '';
+                    $('myCallsign').textContent = myAlias;
+                    $('chatChannel').textContent = channelCode;
+                    $('messages').innerHTML = '';
                     updatePeerCount(msg.data.peer_count || 1);
-                    resetRadio();
-                    pendingAudioHistory = [];
 
+                    // Load history (skip audio/tx messages)
                     if (msg.data.history) {
                         msg.data.history.forEach(m => {
-                            if (m.content && m.content.startsWith('AUDIO:') && m.isAudio) {
-                                // Store audio for playback when tuned in
-                                pendingAudioHistory.push(m);
-                                return;
-                            }
-                            if (m.content && m.content.startsWith('TX_')) return;
-                            if (m.alias === 'SYSTEM') {
-                                addSystemMessage(m.content);
-                            } else {
-                                addMessage(m.alias, m.content, m.alias === myAlias, m.timestamp);
-                            }
+                            if (m.content?.startsWith('AUDIO:') || m.content?.startsWith('TX_')) return;
+                            addMessage(m);
                         });
                     }
 
                     showScreen('chatScreen');
-                    if (pendingAudioHistory.length > 0) {
-                        showToast('Joined ' + channelCode + ' - ' + pendingAudioHistory.length + ' audio clips available', 'success');
-                    } else {
-                        showToast('Joined ' + channelCode + ' as ' + myAlias, 'success');
-                    }
-                    loadLeaderboard();
+                    toast(msg.type === 'ChannelCreated' ? 'CHANNEL CREATED' : 'JOINED ' + channelCode);
+
+                    // Auto-tune radio
+                    initAudio();
                     break;
 
                 case 'Broadcast':
-                    const m = msg.data;
-                    if (m.alias === 'SYSTEM') {
-                        addSystemMessage(m.content);
-                    } else {
-                        addMessage(m.alias, m.content, m.alias === myAlias, m.timestamp);
-                    }
+                    addMessage(msg.data);
                     break;
 
                 case 'PeerJoined':
                     updatePeerCount(peerCount + 1);
-                    if (msg.data && msg.data.alias) {
-                        showToast(msg.data.alias + ' joined', 'success');
-                    }
+                    if (msg.data?.alias) toast(msg.data.alias + ' joined');
                     break;
 
                 case 'PeerLeft':
                     updatePeerCount(Math.max(1, peerCount - 1));
-                    if (msg.data && msg.data.alias) {
-                        showToast(msg.data.alias + ' left', 'error');
-                    }
+                    if (msg.data?.alias) toast(msg.data.alias + ' left', true);
                     break;
 
                 case 'Error':
-                    showToast(msg.data.message, 'error');
+                    toast(msg.data.message, true);
                     break;
             }
         }
 
-        // ==================== RADIO FUNCTIONS ====================
+        function addMessage(m) {
+            const div = document.createElement('div');
+            const isOurs = m.alias === myAlias;
+            const isSystem = m.alias === 'SYSTEM';
+            div.className = 'msg ' + (isSystem ? 'system' : isOurs ? 'ours' : 'theirs');
 
-        function resetRadio() {
-            isTunedIn = false;
-            isTransmitting = false;
-            activeSpeakers.clear();
-            audioQueue = [];
-
-            document.getElementById('tuneBtn').classList.remove('tuned-in');
-            document.getElementById('tuneBtn').innerHTML = '<span>📡</span> Tune In';
-            document.getElementById('pttBtn').disabled = true;
-            document.getElementById('pttBtn').classList.remove('active');
-            document.getElementById('rxLed').className = 'radio-led';
-            document.getElementById('txLed').className = 'radio-led';
-            document.getElementById('vuBar').style.width = '0%';
-            document.getElementById('radioSpeakers').innerHTML = '<span style="color: var(--text-muted);">No transmissions</span>';
-
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
+            if (isSystem) {
+                div.textContent = m.content;
+            } else {
+                const isVoice = m.content?.startsWith('🎙️');
+                div.innerHTML = `
+                    <div class="msg-alias">${m.alias}</div>
+                    <div class="msg-content ${isVoice ? 'msg-voice' : ''}">${escapeHtml(m.content)}</div>
+                    <div class="msg-time">${formatTime(m.timestamp)}</div>
+                `;
             }
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(t => t.stop());
-                mediaStream = null;
-            }
+
+            $('messages').appendChild(div);
+            $('messages').scrollTop = $('messages').scrollHeight;
         }
 
-        async function tuneIn() {
-            if (isTunedIn) {
-                // Tune out
-                resetRadio();
-                showToast('Radio off', 'error');
-                return;
-            }
+        function escapeHtml(s) {
+            return s?.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') || '';
+        }
 
+        function formatTime(ts) {
+            return ts ? new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+        }
+
+        function updatePeerCount(n) {
+            peerCount = n;
+            $('peerCount').textContent = n;
+        }
+
+        // Audio functions
+        async function initAudio() {
             try {
-                // Request microphone for later transmission
                 mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 16000
-                    }
+                    audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
                 });
-
-                // Create audio context for playback
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-                isTunedIn = true;
-                document.getElementById('tuneBtn').classList.add('tuned-in');
-                document.getElementById('tuneBtn').innerHTML = '<span>📡</span> Tuned In';
-                document.getElementById('pttBtn').disabled = false;
-
-                // Play back any pending audio history
-                if (pendingAudioHistory.length > 0) {
-                    showToast('Playing ' + pendingAudioHistory.length + ' recent audio clips...', 'success');
-                    playAudioHistory();
-                } else {
-                    showToast('Radio tuned in - hold PTT to transmit', 'success');
-                }
-
-            } catch (err) {
-                console.error('Microphone access failed:', err);
-                showToast('Microphone access required', 'error');
+                $('pttBtn').disabled = false;
+            } catch (e) {
+                console.error('Mic access failed:', e);
+                toast('Microphone required for radio', true);
             }
-        }
-
-        async function playAudioHistory() {
-            if (!audioContext || pendingAudioHistory.length === 0) return;
-
-            document.getElementById('radioSpeakers').innerHTML =
-                '<span style="color: var(--warning);">📼 Playing back recorded transmissions...</span>';
-            document.getElementById('rxLed').className = 'radio-led receiving';
-
-            for (const audioMsg of pendingAudioHistory) {
-                try {
-                    await playAudioClip(audioMsg.content, audioMsg.alias);
-                    // Small pause between clips
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                } catch (err) {
-                    console.error('Error playing audio history:', err);
-                }
-            }
-
-            pendingAudioHistory = [];
-            document.getElementById('rxLed').className = 'radio-led';
-            document.getElementById('radioSpeakers').innerHTML =
-                '<span style="color: var(--text-muted);">No transmissions</span>';
-            showToast('Playback complete - hold PTT to transmit', 'success');
-        }
-
-        async function playAudioClip(content, alias) {
-            return new Promise(async (resolve, reject) => {
-                try {
-                    if (!audioContext || audioContext.state === 'suspended') {
-                        await audioContext.resume();
-                    }
-
-                    const base64 = content.substring(6); // Remove 'AUDIO:' prefix
-                    const binaryString = atob(base64);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
-                    }
-
-                    const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
-                    const source = audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(audioContext.destination);
-                    source.onended = resolve;
-                    source.start(0);
-
-                    // Update display
-                    document.getElementById('radioSpeakers').innerHTML =
-                        `<span class="radio-speaker active">📼 ${alias}</span>`;
-
-                } catch (err) {
-                    console.error('Audio clip error:', err);
-                    resolve(); // Continue even on error
-                }
-            });
         }
 
         function startTransmit() {
-            if (!isTunedIn || isTransmitting || !mediaStream) return;
-
+            if (!mediaStream || isTransmitting) return;
             isTransmitting = true;
             currentTranscript = '';
-            document.getElementById('pttBtn').classList.add('active');
-            document.getElementById('txLed').className = 'radio-led transmitting';
 
-            // Notify channel
-            ws.send(JSON.stringify({
-                type: 'Broadcast',
-                data: { content: 'TX_START:' + myAlias }
-            }));
+            $('pttBtn').classList.add('active');
+            $('txLed').classList.add('active');
 
-            // Start speech recognition for transcription
-            startSpeechRecognition();
+            ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'TX_START:' + myAlias }}));
 
-            // Start recording
-            mediaRecorder = new MediaRecorder(mediaStream, {
-                mimeType: 'audio/webm;codecs=opus',
-                audioBitsPerSecond: 16000
-            });
+            // Speech recognition
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SR) {
+                try {
+                    speechRecognition = new SR();
+                    speechRecognition.continuous = true;
+                    speechRecognition.interimResults = true;
+                    speechRecognition.onresult = e => {
+                        for (let i = e.resultIndex; i < e.results.length; i++) {
+                            if (e.results[i].isFinal) currentTranscript += e.results[i][0].transcript + ' ';
+                        }
+                    };
+                    speechRecognition.start();
+                } catch (e) {}
+            }
 
-            mediaRecorder.ondataavailable = async (e) => {
+            // Audio recording
+            mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 16000 });
+            mediaRecorder.ondataavailable = async e => {
                 if (e.data.size > 0 && isTransmitting) {
                     const reader = new FileReader();
                     reader.onloadend = () => {
-                        const base64 = reader.result.split(',')[1];
-                        ws.send(JSON.stringify({
-                            type: 'Broadcast',
-                            data: { content: 'AUDIO:' + base64 }
-                        }));
+                        const b64 = reader.result.split(',')[1];
+                        ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'AUDIO:' + b64 }}));
                     };
                     reader.readAsDataURL(e.data);
                 }
             };
-
-            mediaRecorder.start(200); // Send chunks every 200ms
+            mediaRecorder.start(200);
 
             // VU meter
             const analyser = audioContext.createAnalyser();
             const source = audioContext.createMediaStreamSource(mediaStream);
             source.connect(analyser);
             analyser.fftSize = 256;
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-            function updateVU() {
+            const data = new Uint8Array(analyser.frequencyBinCount);
+            (function updateVU() {
                 if (!isTransmitting) return;
-                analyser.getByteFrequencyData(dataArray);
-                const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-                document.getElementById('vuBar').style.width = Math.min(100, avg * 1.5) + '%';
+                analyser.getByteFrequencyData(data);
+                const avg = data.reduce((a, b) => a + b) / data.length;
+                $('vuBar').style.width = Math.min(100, avg * 1.5) + '%';
                 requestAnimationFrame(updateVU);
-            }
-            updateVU();
-        }
-
-        function startSpeechRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                console.log('Speech recognition not supported');
-                return;
-            }
-
-            try {
-                speechRecognition = new SpeechRecognition();
-                speechRecognition.continuous = true;
-                speechRecognition.interimResults = true;
-                speechRecognition.lang = 'en-US';
-
-                speechRecognition.onresult = (event) => {
-                    let finalTranscript = '';
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        }
-                    }
-                    if (finalTranscript) {
-                        currentTranscript += finalTranscript + ' ';
-                    }
-                };
-
-                speechRecognition.onerror = (e) => {
-                    console.log('Speech recognition error:', e.error);
-                };
-
-                speechRecognition.start();
-            } catch (err) {
-                console.log('Speech recognition failed to start:', err);
-            }
-        }
-
-        function stopSpeechRecognition() {
-            if (speechRecognition) {
-                speechRecognition.stop();
-                speechRecognition = null;
-            }
+            })();
         }
 
         function stopTransmit() {
             if (!isTransmitting) return;
-
             isTransmitting = false;
-            document.getElementById('pttBtn').classList.remove('active');
-            document.getElementById('txLed').className = 'radio-led';
-            document.getElementById('vuBar').style.width = '0%';
 
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
+            $('pttBtn').classList.remove('active');
+            $('txLed').classList.remove('active');
+            $('vuBar').style.width = '0%';
 
-            // Stop speech recognition and send transcript
-            stopSpeechRecognition();
+            if (mediaRecorder?.state !== 'inactive') mediaRecorder.stop();
+            if (speechRecognition) { speechRecognition.stop(); speechRecognition = null; }
 
-            // Wait a moment for final transcript then send
+            ws.send(JSON.stringify({ type: 'Broadcast', data: { content: 'TX_END:' + myAlias }}));
+
+            // Send transcript
             setTimeout(() => {
                 if (currentTranscript.trim()) {
-                    // Send transcription as a regular text message with voice indicator
-                    ws.send(JSON.stringify({
-                        type: 'Broadcast',
-                        data: { content: '🎙️ ' + currentTranscript.trim() }
-                    }));
+                    ws.send(JSON.stringify({ type: 'Broadcast', data: { content: '🎙️ ' + currentTranscript.trim() }}));
                 }
                 currentTranscript = '';
             }, 500);
-
-            // Notify channel
-            ws.send(JSON.stringify({
-                type: 'Broadcast',
-                data: { content: 'TX_END:' + myAlias }
-            }));
         }
 
-        function handleTxStatus(data) {
-            if (!isTunedIn) return;
-
-            const content = data.content;
-            const alias = data.alias;
-
-            if (content.startsWith('TX_START:')) {
-                activeSpeakers.add(alias);
-                updateSpeakersDisplay();
-            } else if (content.startsWith('TX_END:')) {
-                activeSpeakers.delete(alias);
-                updateSpeakersDisplay();
-            }
-        }
-
-        function updateSpeakersDisplay() {
-            const speakersEl = document.getElementById('radioSpeakers');
-            const rxLed = document.getElementById('rxLed');
-
-            if (activeSpeakers.size === 0) {
-                rxLed.className = 'radio-led';
-                speakersEl.innerHTML = '<span style="color: var(--text-muted);">No transmissions</span>';
-            } else {
-                rxLed.className = 'radio-led receiving';
-                const speakerTags = Array.from(activeSpeakers).map(alias =>
-                    `<span class="radio-speaker active">🎙️ ${alias}</span>`
-                ).join(' ');
-                speakersEl.innerHTML = speakerTags;
-            }
-        }
-
-        async function handleAudioBroadcast(data) {
-            if (!audioContext || audioContext.state === 'suspended') {
-                await audioContext.resume();
-            }
+        async function playAudio(b64, alias) {
+            if (!audioContext) return;
+            if (audioContext.state === 'suspended') await audioContext.resume();
 
             try {
-                const base64 = data.content.substring(6); // Remove 'AUDIO:' prefix
-                const binaryString = atob(base64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
+                const binary = atob(b64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-                // Decode audio
-                const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
-
-                // Play immediately
+                const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
                 const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
+                source.buffer = buffer;
                 source.connect(audioContext.destination);
                 source.start(0);
 
-                // Update VU meter for incoming audio
-                const avg = 50 + Math.random() * 30;
-                document.getElementById('vuBar').style.width = avg + '%';
-                setTimeout(() => {
-                    if (!isTransmitting && activeSpeakers.size > 0) {
-                        document.getElementById('vuBar').style.width = '0%';
-                    }
-                }, 250);
-
-            } catch (err) {
-                console.error('Audio decode error:', err);
+                // VU
+                $('vuBar').style.width = (50 + Math.random() * 30) + '%';
+                setTimeout(() => { if (activeSpeakers.size > 0) $('vuBar').style.width = '0%'; }, 250);
+            } catch (e) {
+                console.error('Audio decode error:', e);
             }
         }
 
-        function stopRadio() {
-            resetRadio();
-            if (audioContext) {
-                audioContext.close();
-                audioContext = null;
+        function updateSpeakers() {
+            const display = $('speakerDisplay');
+            const rxLed = $('rxLed');
+            if (activeSpeakers.size === 0) {
+                display.textContent = 'STANDBY';
+                display.classList.remove('active');
+                rxLed.classList.remove('active');
+            } else {
+                display.textContent = Array.from(activeSpeakers).join(' + ');
+                display.classList.add('active');
+                rxLed.classList.add('active');
             }
         }
 
-        // ==================== OTHER FUNCTIONS ====================
+        function stopAudio() {
+            isTransmitting = false;
+            activeSpeakers.clear();
+            if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            $('pttBtn').disabled = true;
+        }
 
+        // Channel management
         function createChannel() {
             ws.send(JSON.stringify({ type: 'CreateChannel' }));
         }
 
         function joinChannel(code) {
-            code = code || document.getElementById('joinCodeInput').value;
-            code = code.toUpperCase().trim();
-            if (!code) {
-                showToast('Enter a channel code', 'error');
-                return;
-            }
-            stopRadio();
-            ws.send(JSON.stringify({ type: 'JoinChannel', data: { code } }));
-        }
-
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const content = input.value.trim();
-            if (!content) return;
-            ws.send(JSON.stringify({ type: 'Broadcast', data: { content } }));
-            input.value = '';
+            code = (code || $('codeInput').value).toUpperCase().trim();
+            if (!code) return toast('Enter channel code', true);
+            stopAudio();
+            ws.send(JSON.stringify({ type: 'JoinChannel', data: { code }}));
         }
 
         function leaveChannel() {
-            stopRadio();
+            stopAudio();
             channelCode = null;
-            document.getElementById('messagesContainer').innerHTML = '';
-            closeSidebar();
             showScreen('dashboardScreen');
-            loadLeaderboard();
+            loadChannels();
         }
 
-        function toggleSidebar() {
-            const sidebar = document.getElementById('leaderboardSidebar');
-            const toggle = document.getElementById('leaderboardToggle');
-            sidebarOpen = !sidebarOpen;
-            sidebar.classList.toggle('open', sidebarOpen);
-            toggle.classList.toggle('active', sidebarOpen);
-            if (sidebarOpen) loadLeaderboard();
+        function sendMessage() {
+            const input = $('msgInput');
+            const content = input.value.trim();
+            if (!content) return;
+            ws.send(JSON.stringify({ type: 'Broadcast', data: { content }}));
+            input.value = '';
         }
 
-        function closeSidebar() {
-            document.getElementById('leaderboardSidebar').classList.remove('open');
-            document.getElementById('leaderboardToggle').classList.remove('active');
-            sidebarOpen = false;
-        }
-
-        async function loadLeaderboard() {
+        async function loadChannels() {
             try {
-                const response = await fetch('https://clear-cat-32.deno.dev/api/stats');
-                const data = await response.json();
-                document.getElementById('statTotalChannels').textContent = data.totalChannels || 0;
-                document.getElementById('statActiveChannels').textContent = data.activeChannels || 0;
-                const leaderboard = data.leaderboard || [];
-                renderChannelList('sidebarChannelList', leaderboard);
-                renderChannelList('dashboardChannelList', leaderboard.slice(0, 5));
-            } catch (e) {
-                console.error('Failed to load leaderboard:', e);
-            }
-        }
-
-        function renderChannelList(containerId, channels) {
-            const container = document.getElementById(containerId);
-            if (!channels || channels.length === 0) {
-                container.innerHTML = '<div class="sidebar-loading">No channels yet</div>';
-                return;
-            }
-            container.innerHTML = channels.map(ch => {
-                const isActive = ch.currentPeers > 0;
-                const isCurrent = ch.code === channelCode;
-                const lastMsg = ch.recentMessages && ch.recentMessages.length > 0 ? ch.recentMessages[ch.recentMessages.length - 1] : null;
-                const preview = lastMsg ? `${lastMsg.alias}: ${lastMsg.preview}` : 'No messages yet';
-                return `
-                    <div class="channel-item ${isCurrent ? 'active' : ''}" onclick="joinChannel('${ch.code}')">
-                        <div class="channel-item-header">
-                            <span class="channel-item-code">${ch.code}</span>
-                            <span class="channel-item-peers">${isActive ? '🟢 ' + ch.currentPeers + ' online' : '⚫ offline'}</span>
+                const res = await fetch('https://clear-cat-32.deno.dev/api/stats');
+                const data = await res.json();
+                const list = $('channelList');
+                list.innerHTML = data.leaderboard?.map(ch => `
+                    <div class="channel-item ${ch.code === channelCode ? 'active' : ''}" onclick="joinChannel('${ch.code}')">
+                        <div>
+                            <div class="channel-code">${ch.code}</div>
+                            <div class="channel-meta">${ch.messageCount} msgs · ${ch.totalPeersEver} visitors</div>
                         </div>
-                        <div class="channel-item-stats">${ch.messageCount} messages · ${ch.totalPeersEver} total visitors</div>
-                        <div class="channel-item-preview">${preview}</div>
+                        <div class="channel-peers ${ch.currentPeers > 0 ? '' : 'offline'}">${ch.currentPeers > 0 ? ch.currentPeers + ' ON' : 'OFF'}</div>
                     </div>
-                `;
-            }).join('');
+                `).join('') || '<div style="color: var(--text-dim); text-align: center; padding: 20px;">No channels yet</div>';
+            } catch (e) {
+                console.error('Failed to load channels:', e);
+            }
         }
 
         // Event listeners
-        document.getElementById('startBtn').onclick = connectToRelay;
-        document.getElementById('createChannelBtn').onclick = createChannel;
-        document.getElementById('joinChannelBtn').onclick = () => joinChannel();
-        document.getElementById('joinCodeInput').onkeypress = (e) => { if (e.key === 'Enter') joinChannel(); };
-        document.getElementById('sendBtn').onclick = sendMessage;
-        document.getElementById('messageInput').onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
-        document.getElementById('endChatBtn').onclick = leaveChannel;
-        document.getElementById('leaderboardToggle').onclick = toggleSidebar;
-        document.getElementById('sidebarClose').onclick = closeSidebar;
-        document.getElementById('sidebarRefreshBtn').onclick = loadLeaderboard;
-        document.getElementById('dashboardRefreshBtn').onclick = loadLeaderboard;
+        $('connectBtn').onclick = connect;
+        $('createBtn').onclick = createChannel;
+        $('joinBtn').onclick = () => joinChannel();
+        $('codeInput').onkeypress = e => { if (e.key === 'Enter') joinChannel(); };
+        $('leaveBtn').onclick = leaveChannel;
+        $('sendBtn').onclick = sendMessage;
+        $('msgInput').onkeypress = e => { if (e.key === 'Enter') sendMessage(); };
 
-        // Radio controls
-        document.getElementById('tuneBtn').onclick = tuneIn;
+        // PTT
+        const ptt = $('pttBtn');
+        ptt.onmousedown = startTransmit;
+        ptt.onmouseup = stopTransmit;
+        ptt.onmouseleave = stopTransmit;
+        ptt.ontouchstart = e => { e.preventDefault(); startTransmit(); };
+        ptt.ontouchend = e => { e.preventDefault(); stopTransmit(); };
 
-        // PTT - hold to talk
-        const pttBtn = document.getElementById('pttBtn');
-        pttBtn.onmousedown = startTransmit;
-        pttBtn.onmouseup = stopTransmit;
-        pttBtn.onmouseleave = stopTransmit;
-        pttBtn.ontouchstart = (e) => { e.preventDefault(); startTransmit(); };
-        pttBtn.ontouchend = (e) => { e.preventDefault(); stopTransmit(); };
-
-        // Spacebar as PTT when focused
-        document.addEventListener('keydown', (e) => {
-            if (e.code === 'Space' && isTunedIn && !isTransmitting && document.activeElement.tagName !== 'INPUT') {
+        // Spacebar PTT
+        document.onkeydown = e => {
+            if (e.code === 'Space' && !isTransmitting && channelCode && document.activeElement.tagName !== 'INPUT') {
                 e.preventDefault();
                 startTransmit();
             }
-        });
-        document.addEventListener('keyup', (e) => {
+        };
+        document.onkeyup = e => {
             if (e.code === 'Space' && isTransmitting) {
                 e.preventDefault();
                 stopTransmit();
             }
-        });
+        };
     </script>
 </body>
 </html>
