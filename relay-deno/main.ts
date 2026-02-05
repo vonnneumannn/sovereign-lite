@@ -1,18 +1,36 @@
 // Sovereign Relay Server for Deno Deploy
-// Deploy: https://dash.deno.com -> New Project -> Import from GitHub
+// Channels with persistent message history and agent aliases
 
-interface RoomStats {
+interface Message {
+  id: string;
+  alias: string;
+  content: string;
+  timestamp: Date;
+}
+
+interface ChannelStats {
   code: string;
   created: Date;
-  totalMessages: number;
+  messages: Message[];
   totalPeersEver: number;
-  currentPeers: Set<WebSocket>;
+  currentPeers: Map<WebSocket, string>; // ws -> alias
   lastActivity: Date;
 }
 
-const rooms = new Map<string, RoomStats>();
+const channels = new Map<string, ChannelStats>();
 
-function generateRoomCode(): string {
+// Fun random aliases
+const adjectives = ['Swift', 'Silent', 'Bright', 'Dark', 'Wild', 'Calm', 'Bold', 'Wise', 'Free', 'Noble', 'Stark', 'Keen', 'True', 'Pure', 'Brave', 'Deft', 'Grim', 'Pale', 'Warm', 'Cool'];
+const nouns = ['Wolf', 'Hawk', 'Bear', 'Lion', 'Fox', 'Owl', 'Raven', 'Storm', 'River', 'Mountain', 'Shadow', 'Flame', 'Frost', 'Wind', 'Star', 'Moon', 'Sun', 'Thunder', 'Stone', 'Wave'];
+
+function generateAlias(): string {
+  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  const num = Math.floor(Math.random() * 100);
+  return `${adj}${noun}${num}`;
+}
+
+function generateChannelCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 6; i++) {
@@ -21,10 +39,14 @@ function generateRoomCode(): string {
   return code;
 }
 
-function broadcast(roomCode: string, message: string, exclude?: WebSocket) {
-  const room = rooms.get(roomCode);
-  if (room) {
-    for (const ws of room.currentPeers) {
+function generateMessageId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+function broadcast(channelCode: string, message: string, exclude?: WebSocket) {
+  const channel = channels.get(channelCode);
+  if (channel) {
+    for (const [ws] of channel.currentPeers) {
       if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
         ws.send(message);
       }
@@ -32,115 +54,207 @@ function broadcast(roomCode: string, message: string, exclude?: WebSocket) {
   }
 }
 
-function getRoomLeaderboard() {
-  const allRooms = Array.from(rooms.values());
+function getChannelLeaderboard() {
+  const allChannels = Array.from(channels.values());
 
-  // Sort by activity (messages + current peers)
-  const sorted = allRooms.sort((a, b) => {
-    const scoreA = a.totalMessages + (a.currentPeers.size * 100);
-    const scoreB = b.totalMessages + (b.currentPeers.size * 100);
+  const sorted = allChannels.sort((a, b) => {
+    const scoreA = a.messages.length + (a.currentPeers.size * 100);
+    const scoreB = b.messages.length + (b.currentPeers.size * 100);
     return scoreB - scoreA;
   });
 
-  return sorted.map(room => ({
-    code: room.code,
-    created: room.created.toISOString(),
-    totalMessages: room.totalMessages,
-    totalPeersEver: room.totalPeersEver,
-    currentPeers: room.currentPeers.size,
-    lastActivity: room.lastActivity.toISOString(),
-    isActive: room.currentPeers.size > 0
+  return sorted.map(channel => ({
+    code: channel.code,
+    created: channel.created.toISOString(),
+    messageCount: channel.messages.length,
+    totalPeersEver: channel.totalPeersEver,
+    currentPeers: channel.currentPeers.size,
+    activeAliases: Array.from(channel.currentPeers.values()),
+    lastActivity: channel.lastActivity.toISOString(),
+    isActive: channel.currentPeers.size > 0,
+    recentMessages: channel.messages.slice(-5).map(m => ({
+      alias: m.alias,
+      preview: m.content.substring(0, 50) + (m.content.length > 50 ? '...' : ''),
+      time: m.timestamp.toISOString()
+    }))
   }));
 }
 
 function handleWebSocket(ws: WebSocket) {
-  let currentRoom: string | null = null;
+  let currentChannel: string | null = null;
+  let myAlias: string = generateAlias();
 
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
 
       switch (msg.type) {
+        case 'CreateChannel':
         case 'CreateRoom': {
-          let code = generateRoomCode();
-          while (rooms.has(code)) {
-            code = generateRoomCode();
+          let code = generateChannelCode();
+          while (channels.has(code)) {
+            code = generateChannelCode();
           }
 
           const now = new Date();
-          rooms.set(code, {
+          const channel: ChannelStats = {
             code,
             created: now,
-            totalMessages: 0,
+            messages: [],
             totalPeersEver: 1,
-            currentPeers: new Set([ws]),
+            currentPeers: new Map([[ws, myAlias]]),
             lastActivity: now
-          });
-          currentRoom = code;
+          };
+          channels.set(code, channel);
+          currentChannel = code;
 
+          // Add system message
+          channel.messages.push({
+            id: generateMessageId(),
+            alias: 'SYSTEM',
+            content: `Channel ${code} created by ${myAlias}`,
+            timestamp: now
+          });
+
+          ws.send(JSON.stringify({
+            type: 'ChannelCreated',
+            data: {
+              code,
+              alias: myAlias,
+              history: channel.messages
+            }
+          }));
+
+          // Also send old format for compatibility
           ws.send(JSON.stringify({
             type: 'RoomCreated',
             data: { code }
           }));
 
-          console.log(`Room created: ${code}`);
+          console.log(`Channel created: ${code} by ${myAlias}`);
           break;
         }
 
+        case 'JoinChannel':
         case 'JoinRoom': {
           const code = msg.data?.code?.toUpperCase();
           if (!code) {
             ws.send(JSON.stringify({
               type: 'Error',
-              data: { message: 'Room code required' }
+              data: { message: 'Channel code required' }
             }));
             break;
           }
 
-          let room = rooms.get(code);
+          let channel = channels.get(code);
           const now = new Date();
 
-          if (!room) {
-            room = {
+          if (!channel) {
+            channel = {
               code,
               created: now,
-              totalMessages: 0,
+              messages: [],
               totalPeersEver: 0,
-              currentPeers: new Set(),
+              currentPeers: new Map(),
               lastActivity: now
             };
-            rooms.set(code, room);
+            channels.set(code, channel);
           }
 
           // Notify existing peers
-          broadcast(code, JSON.stringify({ type: 'PeerJoined' }));
-
-          // Join room
-          room.currentPeers.add(ws);
-          room.totalPeersEver++;
-          room.lastActivity = now;
-          currentRoom = code;
-
-          ws.send(JSON.stringify({
-            type: 'Joined',
-            data: { code, peer_count: room.currentPeers.size }
+          broadcast(code, JSON.stringify({
+            type: 'PeerJoined',
+            data: { alias: myAlias }
           }));
 
-          console.log(`Client joined room: ${code} (${room.currentPeers.size} peers)`);
+          // Join channel
+          channel.currentPeers.set(ws, myAlias);
+          channel.totalPeersEver++;
+          channel.lastActivity = now;
+          currentChannel = code;
+
+          // Add system message
+          channel.messages.push({
+            id: generateMessageId(),
+            alias: 'SYSTEM',
+            content: `${myAlias} joined the channel`,
+            timestamp: now
+          });
+
+          // Send channel history to new joiner
+          ws.send(JSON.stringify({
+            type: 'ChannelJoined',
+            data: {
+              code,
+              alias: myAlias,
+              peer_count: channel.currentPeers.size,
+              activeAliases: Array.from(channel.currentPeers.values()),
+              history: channel.messages
+            }
+          }));
+
+          // Also send old format for compatibility
+          ws.send(JSON.stringify({
+            type: 'Joined',
+            data: { code, peer_count: channel.currentPeers.size }
+          }));
+
+          console.log(`${myAlias} joined channel: ${code} (${channel.currentPeers.size} peers)`);
           break;
         }
 
+        case 'Broadcast':
         case 'Forward': {
-          if (currentRoom) {
-            const room = rooms.get(currentRoom);
-            if (room) {
-              room.totalMessages++;
-              room.lastActivity = new Date();
+          if (currentChannel) {
+            const channel = channels.get(currentChannel);
+            if (channel) {
+              const now = new Date();
+              const content = msg.data?.data || msg.data?.content || '';
+
+              const message: Message = {
+                id: generateMessageId(),
+                alias: myAlias,
+                content,
+                timestamp: now
+              };
+
+              channel.messages.push(message);
+              channel.lastActivity = now;
+
+              // Broadcast to all including sender (so they see their alias)
+              const broadcastMsg = JSON.stringify({
+                type: 'Broadcast',
+                data: message
+              });
+
+              for (const [peerWs] of channel.currentPeers) {
+                if (peerWs.readyState === WebSocket.OPEN) {
+                  peerWs.send(broadcastMsg);
+                }
+              }
+
+              // Also send old format for compatibility (exclude sender)
+              broadcast(currentChannel, JSON.stringify({
+                type: 'Message',
+                data: { data: content }
+              }), ws);
             }
-            broadcast(currentRoom, JSON.stringify({
-              type: 'Message',
-              data: { data: msg.data?.data }
-            }), ws);
+          }
+          break;
+        }
+
+        case 'GetHistory': {
+          if (currentChannel) {
+            const channel = channels.get(currentChannel);
+            if (channel) {
+              ws.send(JSON.stringify({
+                type: 'History',
+                data: {
+                  code: currentChannel,
+                  messages: channel.messages
+                }
+              }));
+            }
           }
           break;
         }
@@ -149,9 +263,9 @@ function handleWebSocket(ws: WebSocket) {
           ws.send(JSON.stringify({
             type: 'Stats',
             data: {
-              totalRooms: rooms.size,
-              activeRooms: Array.from(rooms.values()).filter(r => r.currentPeers.size > 0).length,
-              leaderboard: getRoomLeaderboard().slice(0, 20)
+              totalChannels: channels.size,
+              activeChannels: Array.from(channels.values()).filter(c => c.currentPeers.size > 0).length,
+              leaderboard: getChannelLeaderboard().slice(0, 20)
             }
           }));
           break;
@@ -168,12 +282,25 @@ function handleWebSocket(ws: WebSocket) {
   };
 
   ws.onclose = () => {
-    if (currentRoom) {
-      const room = rooms.get(currentRoom);
-      if (room) {
-        room.currentPeers.delete(ws);
-        broadcast(currentRoom, JSON.stringify({ type: 'PeerLeft' }));
-        console.log(`Peer left room: ${currentRoom} (${room.currentPeers.size} remaining)`);
+    if (currentChannel) {
+      const channel = channels.get(currentChannel);
+      if (channel) {
+        channel.currentPeers.delete(ws);
+
+        // Add system message
+        channel.messages.push({
+          id: generateMessageId(),
+          alias: 'SYSTEM',
+          content: `${myAlias} left the channel`,
+          timestamp: new Date()
+        });
+
+        broadcast(currentChannel, JSON.stringify({
+          type: 'PeerLeft',
+          data: { alias: myAlias }
+        }));
+
+        console.log(`${myAlias} left channel: ${currentChannel} (${channel.currentPeers.size} remaining)`);
       }
     }
   };
@@ -184,21 +311,22 @@ function handleWebSocket(ws: WebSocket) {
 }
 
 function generateStatsHTML(url: URL): string {
-  const allRooms = Array.from(rooms.values());
-  const activeRooms = allRooms.filter(r => r.currentPeers.size > 0);
-  const totalMessages = allRooms.reduce((sum, r) => sum + r.totalMessages, 0);
-  const totalPeers = allRooms.reduce((sum, r) => sum + r.currentPeers.size, 0);
+  const allChannels = Array.from(channels.values());
+  const activeChannels = allChannels.filter(c => c.currentPeers.size > 0);
+  const totalMessages = allChannels.reduce((sum, c) => sum + c.messages.length, 0);
+  const totalPeers = allChannels.reduce((sum, c) => sum + c.currentPeers.size, 0);
 
-  const leaderboard = getRoomLeaderboard().slice(0, 25);
+  const leaderboard = getChannelLeaderboard().slice(0, 25);
 
-  const roomRows = leaderboard.map((room, i) => `
-    <tr style="background: ${room.isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent'}">
+  const channelRows = leaderboard.map((channel, i) => `
+    <tr style="background: ${channel.isActive ? 'rgba(34, 197, 94, 0.1)' : 'transparent'}">
       <td>${i + 1}</td>
-      <td><code style="color: ${room.isActive ? '#22c55e' : '#818cf8'}">${room.code}</code></td>
-      <td>${room.currentPeers} ${room.isActive ? '🟢' : '⚫'}</td>
-      <td>${room.totalMessages}</td>
-      <td>${room.totalPeersEver}</td>
-      <td>${new Date(room.lastActivity).toLocaleString()}</td>
+      <td><code style="color: ${channel.isActive ? '#22c55e' : '#818cf8'}">${channel.code}</code></td>
+      <td>${channel.currentPeers} ${channel.isActive ? '🟢' : '⚫'}</td>
+      <td title="${channel.activeAliases.join(', ')}">${channel.activeAliases.slice(0, 3).join(', ')}${channel.activeAliases.length > 3 ? '...' : ''}</td>
+      <td>${channel.messageCount}</td>
+      <td>${channel.totalPeersEver}</td>
+      <td>${new Date(channel.lastActivity).toLocaleString()}</td>
     </tr>
   `).join('');
 
@@ -206,15 +334,15 @@ function generateStatsHTML(url: URL): string {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Sovereign Relay - Stats</title>
-      <meta http-equiv="refresh" content="10">
+      <title>Sovereign Relay - Channel Stats</title>
+      <meta http-equiv="refresh" content="5">
       <style>
         body {
           font-family: system-ui;
           background: #0a0a0f;
           color: #f1f5f9;
           padding: 40px;
-          max-width: 1000px;
+          max-width: 1200px;
           margin: 0 auto;
         }
         h1 { color: #818cf8; margin-bottom: 8px; }
@@ -245,20 +373,20 @@ function generateStatsHTML(url: URL): string {
     </head>
     <body>
       <h1>🔐 Sovereign Relay</h1>
-      <p class="subtitle">Real-time room statistics (auto-refreshes every 10s)</p>
+      <p class="subtitle">Channel statistics with persistent history (auto-refreshes every 5s)</p>
 
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-value">${rooms.size}</div>
-          <div class="stat-label">Total Rooms</div>
+          <div class="stat-value">${channels.size}</div>
+          <div class="stat-label">Total Channels</div>
         </div>
         <div class="stat-card">
-          <div class="stat-value active-badge">${activeRooms.length}</div>
-          <div class="stat-label">Active Rooms</div>
+          <div class="stat-value active-badge">${activeChannels.length}</div>
+          <div class="stat-label">Active Channels</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">${totalPeers}</div>
-          <div class="stat-label">Connected Peers</div>
+          <div class="stat-label">Connected Agents</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">${totalMessages}</div>
@@ -266,27 +394,29 @@ function generateStatsHTML(url: URL): string {
         </div>
       </div>
 
-      <h2 style="margin-bottom: 16px;">Room Leaderboard</h2>
+      <h2 style="margin-bottom: 16px;">Channel Leaderboard</h2>
       <table>
         <thead>
           <tr>
             <th>#</th>
-            <th>Room Code</th>
-            <th>Peers Now</th>
+            <th>Channel</th>
+            <th>Agents</th>
+            <th>Active Aliases</th>
             <th>Messages</th>
             <th>Total Visitors</th>
             <th>Last Activity</th>
           </tr>
         </thead>
         <tbody>
-          ${roomRows || '<tr><td colspan="6" style="text-align: center; color: #64748b;">No rooms yet. Create one at the <a href="https://vonnneumannn.github.io/sovereign-lite/">Web App</a>!</td></tr>'}
+          ${channelRows || '<tr><td colspan="7" style="text-align: center; color: #64748b;">No channels yet. Create one at the <a href="https://vonnneumannn.github.io/sovereign-lite/">Web App</a>!</td></tr>'}
         </tbody>
       </table>
 
       <p style="margin-top: 32px; color: #64748b;">
         WebSocket: <code>wss://${url.host}</code> |
         <a href="https://github.com/vonnneumannn/sovereign-lite">GitHub</a> |
-        <a href="https://vonnneumannn.github.io/sovereign-lite/">Web App</a>
+        <a href="https://vonnneumannn.github.io/sovereign-lite/">Web App</a> |
+        <a href="/api/stats">JSON API</a>
       </p>
     </body>
     </html>
@@ -296,30 +426,26 @@ function generateStatsHTML(url: URL): string {
 Deno.serve({ port: 8000 }, (req) => {
   const url = new URL(req.url);
 
-  // Health check
   if (url.pathname === '/health') {
     return new Response('OK', { status: 200 });
   }
 
-  // JSON API for stats
   if (url.pathname === '/api/stats') {
     return new Response(JSON.stringify({
-      totalRooms: rooms.size,
-      activeRooms: Array.from(rooms.values()).filter(r => r.currentPeers.size > 0).length,
-      leaderboard: getRoomLeaderboard()
+      totalChannels: channels.size,
+      activeChannels: Array.from(channels.values()).filter(c => c.currentPeers.size > 0).length,
+      leaderboard: getChannelLeaderboard()
     }), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 
-  // WebSocket upgrade
   if (req.headers.get('upgrade') === 'websocket') {
     const { socket, response } = Deno.upgradeWebSocket(req);
     handleWebSocket(socket);
     return response;
   }
 
-  // Stats page (HTML)
   return new Response(generateStatsHTML(url), {
     headers: { 'Content-Type': 'text/html' },
   });
