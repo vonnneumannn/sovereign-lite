@@ -125,6 +125,9 @@
             cursor: pointer;
             transition: background 0.1s;
             touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(0,255,0,0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
         .channel-item:hover { background: rgba(0,255,0,0.05); }
         .channel-item.active { background: rgba(0,255,0,0.1); border-left: 3px solid var(--accent); }
@@ -841,11 +844,23 @@
         $('sendBtn').onclick = sendMessage;
         $('msgInput').onkeypress = e => { if (e.key === 'Enter') sendMessage(); };
 
-        // Channel list clicks
-        $('channelList').onclick = e => {
+        // Channel list clicks - handle both click and touch
+        $('channelList').addEventListener('click', e => {
+            e.preventDefault();
             const item = e.target.closest('.channel-item');
-            if (item) joinChannel(item.dataset.code);
-        };
+            if (item && item.dataset.code) {
+                joinChannel(item.dataset.code);
+            }
+        });
+
+        // Touch support for mobile
+        $('channelList').addEventListener('touchend', e => {
+            const item = e.target.closest('.channel-item');
+            if (item && item.dataset.code) {
+                e.preventDefault();
+                joinChannel(item.dataset.code);
+            }
+        });
 
         // PTT
         const ptt = $('pttBtn');
